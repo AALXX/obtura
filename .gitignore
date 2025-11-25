@@ -1,0 +1,6 @@
+/client-layer/client/node_modules
+/client-layer/client/.env
+/client-layer/client/.next
+
+/api-layer/core-api/node_modules
+/api-layer/core-api/.env

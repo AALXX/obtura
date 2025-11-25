@@ -1,0 +1,16 @@
+FROM node:25.2.1-alpine
+
+WORKDIR /app
+
+# Copy only package files first for better caching
+COPY package.json package-lock.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy the rest of the app (but source will be mounted in dev)
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

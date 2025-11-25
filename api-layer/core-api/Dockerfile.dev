@@ -1,0 +1,16 @@
+FROM node:25.2.1-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy all files
+COPY . .
+
+# Expose port
+EXPOSE 7070
+
+# Dev command with hot reload
+CMD ["npm", "run", "dev"]
