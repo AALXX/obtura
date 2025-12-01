@@ -1,6 +1,3 @@
-// 1. Install dependencies:
-// npm install next-auth@beta @auth/core
-
 import NextAuth from 'next-auth'
 import Google from 'next-auth/providers/google'
 import axios from 'axios'

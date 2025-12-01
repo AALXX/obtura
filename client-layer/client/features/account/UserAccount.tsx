@@ -29,7 +29,7 @@ const UserAccount: React.FC<UserResponse & { userAccessToken: string; userImg: s
     }
 
     return (
-        <main className="container mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
+        <div className="container mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
             <div className="space-y-5 sm:space-y-6">
                 <div>
                     <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Account Details</h2>
@@ -107,7 +107,7 @@ const UserAccount: React.FC<UserResponse & { userAccessToken: string; userImg: s
                     </button>
                 </div>
             </div>
-        </main>
+        </div>
     )
 }
 

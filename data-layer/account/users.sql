@@ -1,24 +1,57 @@
+
+-- Minimal enums
+CREATE TYPE user_status AS ENUM ('active', 'suspended', 'deleted');
+CREATE TYPE team_role AS ENUM ('owner', 'admin', 'member');
+CREATE TYPE data_region AS ENUM ('eu-central', 'eu-west', 'eu-north');
+
+
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    
+    -- Identity
     email VARCHAR(255) UNIQUE NOT NULL,
     name VARCHAR(255),
-    description TEXT,
+    avatar_url TEXT,
+    
+    -- Auth
+    password_hash TEXT,
+    email_verified BOOLEAN DEFAULT false,
+    
+    -- Status
+    status user_status DEFAULT 'active',
+    
+    -- GDPR Essentials (just 3 fields!)
+    data_region data_region DEFAULT 'eu-central',
+    marketing_consent BOOLEAN DEFAULT false,
+    deletion_requested_at TIMESTAMP, -- Right to erasure
+    
+    -- Timestamps
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    updated_at TIMESTAMP DEFAULT NOW(),
+    deleted_at TIMESTAMP -- Soft delete
 );
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_status ON users(status);
+
 
 CREATE TABLE oauth_accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    provider VARCHAR(50) NOT NULL CHECK (provider IN ('google')), 
-    provider_account_id VARCHAR(255) NOT NULL, 
-    access_token TEXT, 
+    
+    provider VARCHAR(50) NOT NULL, -- 'google', 'github'
+    provider_account_id VARCHAR(255) NOT NULL,
+    
+    -- Tokens (encrypt these in application code before storage)
+    access_token TEXT,
     refresh_token TEXT,
     expires_at TIMESTAMP,
+    
     created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW(),
+    
     UNIQUE(provider, provider_account_id)
 );
+
 
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -31,9 +64,3 @@ CREATE TABLE sessions (
     ip_address INET,
     user_agent TEXT
 );
-
-CREATE INDEX idx_oauth_accounts_user_id ON oauth_accounts(user_id);
-CREATE INDEX idx_oauth_accounts_provider ON oauth_accounts(provider, provider_account_id);
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_sessions_access_token ON sessions(access_token);
-CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
