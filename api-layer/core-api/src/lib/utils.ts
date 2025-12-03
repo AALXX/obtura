@@ -1,5 +1,7 @@
 import db from '../config/postgresql';
 import bcrypt from 'bcrypt';
+import { Request } from 'express';
+import { lookup } from 'geoip-lite';
 
 export const formatDate = (date: Date) => {
     return new Date(date).toLocaleDateString('en-US', {
@@ -27,4 +29,42 @@ export const hashPassword = async (password: string): Promise<string> => {
     const salt = await bcrypt.genSalt(saltRounds);
     const hashedPassword = await bcrypt.hash(password, salt);
     return hashedPassword;
+};
+
+export const getDataRegion = (req: Request): string => {
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.headers['x-real-ip'] || req.ip || req.socket.remoteAddress;
+
+    const countryCode = req.headers['cf-ipcountry'] || req.headers['cloudfront-viewer-country'];
+
+    if (countryCode) {
+        return mapCountryToRegion(countryCode as string);
+    }
+
+    const geo = lookup(ip as string);
+
+    if (geo?.country) {
+        return mapCountryToRegion(geo.country);
+    }
+
+    return 'eu-central';
+};
+
+const mapCountryToRegion = (countryCode: string): string => {
+    const countryUpper = countryCode.toUpperCase();
+
+    const euCentral = ['DE', 'AT', 'CH', 'PL', 'CZ', 'SK', 'HU', 'SI', 'HR', 'LI'];
+
+    const euWest = ['FR', 'BE', 'NL', 'LU', 'GB', 'IE', 'MC'];
+
+    const euNorth = ['SE', 'NO', 'DK', 'FI', 'IS', 'EE', 'LV', 'LT'];
+
+    if (euCentral.includes(countryUpper)) {
+        return 'eu-central';
+    } else if (euWest.includes(countryUpper)) {
+        return 'eu-west';
+    } else if (euNorth.includes(countryUpper)) {
+        return 'eu-north';
+    }
+
+    return 'eu-central';
 };

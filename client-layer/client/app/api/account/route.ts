@@ -41,6 +41,7 @@ export async function GET() {
             accountType: resp.data.accountType,
             authenticated: true,
             hasCompany: resp.data.hasCompany,
+            email: resp.data.email,
             image: image
         })
     } catch (error) {

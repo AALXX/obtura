@@ -11,7 +11,7 @@ const OnboardingPage = async () => {
         return <AuthRequired featureAccess="account" />
     }
 
-    const response = await axios.get<any>(`${process.env.BACKEND_URL}/account-manager/check-company-status/${session.backendToken}`)
+    const response = await axios.get<{ hasCompany: boolean }>(`${process.env.BACKEND_URL}/account-manager/check-company-status/${session.backendToken}`)
 
     if (response.data.hasCompany) {
         redirect('/account')

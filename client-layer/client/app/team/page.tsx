@@ -4,9 +4,11 @@ import axios from 'axios'
 import { UserResponse } from '@/features/account/types/AccoutTypes'
 import UserProjects from '@/features/projects/UserProjects'
 import CompanyRequired from '@/common-components/CompayRequired'
-import { useAccountStore } from '@/lib/store/accountStore'
+import Teams from '@/features/teams/Teams'
 
-const Projects = async () => {
+
+
+const Team = async () => {
     const session = await auth()
 
     try {
@@ -21,7 +23,7 @@ const Projects = async () => {
 
         return (
             <div>
-                <UserProjects />
+                <Teams />
             </div>
         )
     } catch (error) {
@@ -33,4 +35,4 @@ const Projects = async () => {
     }
 }
 
-export default Projects
+export default Team

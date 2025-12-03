@@ -6,6 +6,7 @@ interface User {
     accountType: string
     image: string
     hasCompany: boolean
+    email: string
 }
 
 interface AccountState {
@@ -27,7 +28,6 @@ export const useAccountStore = create<AccountState>(set => ({
     status: 'idle',
     error: null,
 
-    // Actions
     fetchAccount: async () => {
         set({ status: 'loading', error: null })
 
@@ -50,6 +50,7 @@ export const useAccountStore = create<AccountState>(set => ({
                     name: data.name,
                     accountType: data.accountType,
                     image: data.image,
+                    email: data.email,
                     hasCompany: data.hasCompany
                 },
                 authenticated: data.authenticated,

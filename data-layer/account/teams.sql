@@ -32,3 +32,16 @@ CREATE TABLE team_members (
     
     UNIQUE(team_id, user_id)
 );
+
+CREATE TABLE team_invitations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    email VARCHAR(255) NOT NULL,
+    role team_role DEFAULT 'member',
+    invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    
+    UNIQUE(team_id, email)
+);

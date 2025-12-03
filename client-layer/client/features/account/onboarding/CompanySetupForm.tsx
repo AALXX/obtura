@@ -51,7 +51,6 @@ const subscriptionPlans = [
 
 const CompanySetupForm: React.FC<CompanySetupFormProps> = ({ userEmail, userName, userId, accessToken }) => {
     const router = useRouter()
-    const { user, status, fetchAccount } = useAccountStore()
 
     const [step, setStep] = useState<'company' | 'subscription'>('company')
     const [formData, setFormData] = useState({
@@ -63,16 +62,6 @@ const CompanySetupForm: React.FC<CompanySetupFormProps> = ({ userEmail, userName
     })
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState('')
-
-    useEffect(() => {
-        if (status === 'idle') {
-            fetchAccount()
-        }
-    }, [status, fetchAccount])
-
-    if (user?.hasCompany) {
-        // router.push('/account')
-    }
 
     const handleCompanySubmit = (e: React.FormEvent) => {
         e.preventDefault()
