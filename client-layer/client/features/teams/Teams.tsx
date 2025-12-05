@@ -5,6 +5,7 @@ import { TeamData } from './types/TeamTypes'
 import TeamCard from './components/TeamCard'
 import DialogCanvas from '@/common-components/DialogCanvas'
 import CreateNewTeamDialog from './components/CreateTeamDialog'
+import Link from 'next/link'
 
 const Teams: React.FC<{ teams: TeamData[]; accessToken: string }> = props => {
     const [searchQuery, setSearchQuery] = useState('')
@@ -13,8 +14,6 @@ const Teams: React.FC<{ teams: TeamData[]; accessToken: string }> = props => {
     const [showCreateTeamDialog, setShowCreateTeamDialog] = useState(false)
 
     const filteredTeams = teams.filter(team => team.name.toLowerCase().includes(searchQuery.toLowerCase()))
-
-
 
     return (
         <div className="container mx-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
@@ -42,7 +41,9 @@ const Teams: React.FC<{ teams: TeamData[]; accessToken: string }> = props => {
 
             <div className="space-y-4">
                 {filteredTeams.map(team => (
-                    <TeamCard key={team.id} {...team} />
+                    <Link href={`/team/${team.id}`} key={team.id} >
+                        <TeamCard key={team.id} {...team} />
+                    </Link>
                 ))}
 
                 {filteredTeams.length === 0 && (

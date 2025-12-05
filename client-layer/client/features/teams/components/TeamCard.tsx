@@ -3,9 +3,9 @@ import React from 'react'
 import { TeamData } from '../types/TeamTypes'
 import { Users } from 'lucide-react'
 
-const TeamCard: React.FC<TeamData> = ({ id, name, updated_at, memberCount, is_active}) => {
+const TeamCard: React.FC<TeamData> = ({ id, name, updated_at, memberCount, is_active }) => {
     return (
-        <div key={id} className="cursor-pointer rounded-lg border border-zinc-800 bg-[#1b1b1b] p-6 transition-colors hover:border-zinc-700">
+        <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-6 transition-colors hover:bg-[#1e1e1e]">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <div className="bg-opacity-20 rounded-lg bg-orange-500/10 p-3">
