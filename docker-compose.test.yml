@@ -5,6 +5,7 @@ networks:
     driver: bridge
 
 services:
+
   traefik:
     image: traefik:v3
     container_name: obtura-traefik
@@ -12,11 +13,11 @@ services:
       - --providers.docker=true
       - --providers.docker.exposedbydefault=false
       - --entryPoints.web.address=:80
-      - --api.insecure=true                     
+      - --api.insecure=true
       - --log.level=INFO
     ports:
-      - "80:80"     
-      - "8080:8080" 
+      - "80:80"
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
@@ -30,24 +31,16 @@ services:
     container_name: obtura-frontend
     labels:
       - "traefik.enable=true"
-      
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`) && Host(`localhost`)"
       - "traefik.http.routers.frontend.entrypoints=web"
       - "traefik.http.routers.frontend.priority=10"
-      
     ports:
-      - "3000:3000"  
+      - "3000:3000"
     volumes:
       - ./client-layer/client:/app
       - /app/node_modules
-    environment:
-      - NODE_ENV=development
-      - BACKEND_URL=http://traefik/backend
-      - NEXT_PUBLIC_BACKEND_URL=http://localhost/backend      
-      - GOOGLE_CLIENT_ID=
-      - GOOGLE_CLIENT_SECRET=
-      - NEXTAUTH_URL=http://localhost
-      - AUTH_SECRET=
+    env_file:
+      - .env
     depends_on:
       - traefik
     networks:
@@ -60,33 +53,18 @@ services:
     container_name: obtura-core-api
     labels:
       - "traefik.enable=true"
-      
       - "traefik.http.routers.core-api.rule=PathPrefix(`/backend`)"
       - "traefik.http.routers.core-api.entrypoints=web"
       - "traefik.http.routers.core-api.priority=20"
-      
       - "traefik.http.middlewares.strip-backend.stripprefix.prefixes=/backend"
-      - "traefik.http.routers.core-api.middlewares=strip-backend"  
-
+      - "traefik.http.routers.core-api.middlewares=strip-backend"
     ports:
-      - "7070:7070" 
+      - "7070:7070"
     volumes:
       - ./api-layer/core-api:/app
       - /app/node_modules
-    environment:
-      - NODE_ENV=development
-      - POSTGRESQL_HOST=postgres
-      - POSTGRESQL_DATABASE=obtura_db
-      - POSTGRESQL_USER=alx
-      - POSTGRESQL_PASSWORD=serbvn
-      - REDIS_URL=redis://redis:6379
-      - ACCOUNT_SECRET=
-      - GOOGLE_CLIENT_ID=
-      - FRONTEND_URL=http://localhost
-      - EMAIL_USERNAME=
-      - EMAIL_PASS=
-      - CHANGE_GMAIL_SECRET=
-      
+    env_file:
+      - .env
     depends_on:
       - postgres
       - redis
@@ -97,10 +75,8 @@ services:
   postgres:
     image: postgres:18-alpine
     container_name: obtura-postgres
-    environment:
-      - POSTGRES_USER=alx
-      - POSTGRES_PASSWORD=serbvn
-      - POSTGRES_DB=obtura_db
+    env_file:
+      - .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -122,13 +98,12 @@ services:
   minio:
     image: minio/minio:latest
     container_name: obtura-minio
-    environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+    env_file:
+      - .env
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000" 
-      - "9001:9001" 
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
     networks:

@@ -4,8 +4,7 @@
     "description": "",
     "scripts": {
         "dev": "ts-node-dev --respawn --transpile-only ./src/core_api.ts",
-        "build-local": "rm -rf backend-build/ && tsc && mv -i projects.json backend-build/ && mv -i -v projects_images backend-build/",
-        "build": "tsc && mv -i projects.json backend-build/ && mv -i projects_images backend-build/ && rm -v -rf src"
+        "build": "tsc "
     },
     "keywords": [],
     "author": "s3rbvn",

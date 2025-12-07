@@ -1,0 +1,107 @@
+pipeline {
+    agent any
+
+    environment {
+        FRONTEND_DIR = "client-layer/client"
+        API_DIR = "api-layer/core-api"
+        COMPOSE_FILE = "docker-compose.test.yml"
+        DEPLOY_DIR = "${WORKSPACE}"
+
+        GOOGLE_CLIENT_ID       = credentials('google-client-id')
+        GOOGLE_CLIENT_SECRET   = credentials('google-client-secret')
+        EMAIL_USERNAME         = credentials('email-username')
+        EMAIL_PASS             = credentials('email-password')
+        POSTGRESQL_PASSWORD    = credentials('postgres-password')
+        AUTH_SECRET            = credentials('auth-secret')
+        CHANGE_GMAIL_SECRET    = credentials('change-gmail-secret')
+        MINIO_ROOT_USER        = credentials('minio-root-user')
+        MINIO_ROOT_PASSWORD    = credentials('minio-root-pass')
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('.env Injection (Secrets)') {
+            steps {
+                sh '''
+cat > .env <<EOF
+NODE_ENV=development
+
+POSTGRES_USER=alx
+POSTGRES_PASSWORD=${POSTGRESQL_PASSWORD}
+POSTGRES_DB=obtura_db
+POSTGRESQL_HOST=postgres
+POSTGRESQL_DATABASE=obtura_db
+POSTGRESQL_USER=alx
+POSTGRESQL_PASSWORD=${POSTGRESQL_PASSWORD}
+
+REDIS_URL=redis://redis:6379
+
+GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+
+EMAIL_USERNAME=${EMAIL_USERNAME}
+EMAIL_PASS=${EMAIL_PASS}
+
+AUTH_SECRET=${AUTH_SECRET}
+CHANGE_GMAIL_SECRET=${CHANGE_GMAIL_SECRET}
+
+FRONTEND_URL=http://localhost
+BACKEND_URL=http://traefik/backend
+
+MINIO_ROOT_USER=${MINIO_ROOT_USER}
+MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+EOF
+                '''
+            }
+        }
+
+        stage('Frontend: Install + Build') {
+            steps {
+                dir(FRONTEND_DIR) {
+                    sh 'npm ci'
+                    sh 'npm run build'
+                }
+            }
+        }
+
+        stage('Core API: Install + Test') {
+            steps {
+                dir(API_DIR) {
+                    sh 'npm ci'
+                    sh 'npm run build'
+                }
+            }
+        }
+
+        stage('Docker Build (Test Images)') {
+            steps {
+                sh "docker compose -f ${COMPOSE_FILE} build"
+            }
+        }
+
+        stage('Deploy Test Stack') {
+            steps {
+                sh """
+                    docker compose -f ${COMPOSE_FILE} down
+                    docker compose -f ${COMPOSE_FILE} up -d
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✔ Test environment deployed successfully."
+        }
+        failure {
+            echo "❌ Deployment failed — check logs."
+        }
+    }
+}
+ 
