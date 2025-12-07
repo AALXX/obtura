@@ -5,7 +5,6 @@ pipeline {
         FRONTEND_DIR = "client-layer/client"
         API_DIR = "api-layer/core-api"
         COMPOSE_FILE = "docker-compose.test.yml"
-        DEPLOY_DIR = "${WORKSPACE}"
 
         GOOGLE_CLIENT_ID       = credentials('google-client-id')
         GOOGLE_CLIENT_SECRET   = credentials('google-client-secret')
@@ -26,7 +25,7 @@ pipeline {
             }
         }
 
-        stage('.env Injection (Secrets)') {
+        stage('Inject .env') {
             steps {
                 sh '''
 cat > .env <<EOF
@@ -61,31 +60,13 @@ EOF
             }
         }
 
-        stage('Frontend: Install + Build') {
+        stage('Docker Build') {
             steps {
-                dir(FRONTEND_DIR) {
-                    sh 'npm ci'
-                    sh 'npm run build'
-                }
+                sh "docker compose -f ${COMPOSE_FILE} build --no-cache"
             }
         }
 
-        stage('Core API: Install + Test') {
-            steps {
-                dir(API_DIR) {
-                    sh 'npm ci'
-                    sh 'npm run build'
-                }
-            }
-        }
-
-        stage('Docker Build (Test Images)') {
-            steps {
-                sh "docker compose -f ${COMPOSE_FILE} build"
-            }
-        }
-
-        stage('Deploy Test Stack') {
+        stage('Deploy Stack') {
             steps {
                 sh """
                     docker compose -f ${COMPOSE_FILE} down
@@ -104,4 +85,3 @@ EOF
         }
     }
 }
- 
