@@ -2,8 +2,6 @@ pipeline {
     agent any
 
     environment {
-        FRONTEND_DIR = "client-layer/client"
-        API_DIR = "api-layer/core-api"
         COMPOSE_FILE = "docker-compose.test.yml"
 
         GOOGLE_CLIENT_ID       = credentials('google-client-id')
@@ -62,15 +60,15 @@ EOF
 
         stage('Docker Build') {
             steps {
-                sh "docker compose -f ${COMPOSE_FILE} build --no-cache"
+                sh "docker-compose -f ${COMPOSE_FILE} build --no-cache"
             }
         }
 
         stage('Deploy Stack') {
             steps {
                 sh """
-                    docker compose -f ${COMPOSE_FILE} down
-                    docker compose -f ${COMPOSE_FILE} up -d
+                    docker-compose -f ${COMPOSE_FILE} down
+                    docker-compose -f ${COMPOSE_FILE} up -d
                 """
             }
         }
