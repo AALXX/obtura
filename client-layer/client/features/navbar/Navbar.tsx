@@ -92,9 +92,8 @@ const NavBar = () => {
                     <div className="flex items-center">
                         <Link href="/" className="group flex items-center">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-linear-to-br from-neutral-700 to-neutral-800 shadow-lg ring-1 ring-neutral-700/50">
-                                    <div className="h-3.5 w-3.5 rounded-sm bg-white"></div>
-                                </div>
+                                <Image src="/logo.png" width={1000} height={100} alt="Obtura Logo " className='h-12 w-12'/>
+                               
                                 <h1 className="text-lg font-semibold tracking-tight text-white transition-colors group-hover:text-neutral-100">Obtura</h1>
                             </div>
                         </Link>

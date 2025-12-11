@@ -1,14 +1,17 @@
 import React, { useState } from 'react'
-import { Mail, X, UserPlus, Loader2 } from 'lucide-react'
+import { Mail, X, UserPlus, Loader2, Shield, User } from 'lucide-react'
+import axios from 'axios'
 
 interface InviteMember {
     email: string
+    role: 'owner' | 'member'
     id: string
 }
 
-const InviteMemberDialog = () => {
+const InviteMemberDialog: React.FC<{ accessToken: string; teamId: string }> = ({ accessToken, teamId }) => {
     const [emails, setEmails] = useState<InviteMember[]>([])
     const [currentEmail, setCurrentEmail] = useState('')
+    const [currentRole, setCurrentRole] = useState<'owner' | 'member'>('member')
     const [emailError, setEmailError] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [successMessage, setSuccessMessage] = useState('')
@@ -37,8 +40,9 @@ const InviteMemberDialog = () => {
             return
         }
 
-        setEmails([...emails, { email: currentEmail, id: Date.now().toString() }])
+        setEmails([...emails, { email: currentEmail, role: currentRole, id: Date.now().toString() }])
         setCurrentEmail('')
+        setCurrentRole('member')
     }
 
     const handleRemoveEmail = (id: string) => {
@@ -62,17 +66,33 @@ const InviteMemberDialog = () => {
         setIsLoading(true)
         setSuccessMessage('')
 
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1500))
+        try {
+            const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/invite-members`, {
+                accessToken: accessToken,
+                teamId: teamId,
+                invitations: emails.map(e => ({
+                    email: e.email,
+                    role: e.role
+                }))
+            })
 
-        setIsLoading(false)
-        setSuccessMessage(`Invitation${emails.length > 1 ? 's' : ''} sent successfully to ${emails.length} member${emails.length > 1 ? 's' : ''}!`)
+            if (resp.status !== 200) {
+                setEmailError('Something went wrong while sending invitations')
+                setIsLoading(false)
+                return
+            }
 
-        // Clear form after 2 seconds
-        setTimeout(() => {
-            setEmails([])
-            setSuccessMessage('')
-        }, 2000)
+            setIsLoading(false)
+            setSuccessMessage(`Invitation${emails.length > 1 ? 's' : ''} sent successfully to ${emails.length} member${emails.length > 1 ? 's' : ''}!`)
+
+            setTimeout(() => {
+                setEmails([])
+                setSuccessMessage('')
+            }, 2000)
+        } catch (error) {
+            setEmailError('Failed to send invitations. Please try again.')
+            setIsLoading(false)
+        }
     }
 
     return (
@@ -88,10 +108,10 @@ const InviteMemberDialog = () => {
             <div className="my-4 h-px w-full border-b border-neutral-800" />
 
             <div className="flex-1 space-y-6">
-                <div>
-                    <label className="mb-2 block text-white">Email Address</label>
-                    <div className="flex gap-2">
-                        <div className="relative flex-1">
+                <div className="space-y-4">
+                    <div>
+                        <label className="mb-2 block text-white">Email Address</label>
+                        <div className="relative">
                             <Mail className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-gray-500" size={18} />
                             <input
                                 type="email"
@@ -105,11 +125,38 @@ const InviteMemberDialog = () => {
                                 className="w-full rounded-md bg-[#0a0a0a] py-2 pr-3 pl-10 text-white placeholder:text-gray-500 focus:ring-2 focus:ring-gray-500 focus:outline-none"
                             />
                         </div>
-                        <button onClick={handleAddEmail} className="cursor-pointer rounded-md border border-white px-6 py-2 text-white transition-colors hover:bg-[#ffffff1a]">
-                            Add
-                        </button>
                     </div>
-                    {emailError && <p className="mt-2 text-sm text-red-400">{emailError}</p>}
+
+                    <div>
+                        <label className="mb-2 block text-white">Role</label>
+                        <div className="grid grid-cols-2 gap-3">
+                            <button onClick={() => setCurrentRole('member')} className={`flex items-center gap-3 rounded-md border p-4 transition-all ${currentRole === 'member' ? 'border-orange-500 bg-orange-500/10' : 'border-neutral-800 bg-[#0a0a0a] hover:border-neutral-700'}`}>
+                                <div className={`flex h-10 w-10 items-center justify-center rounded-full ${currentRole === 'member' ? 'bg-orange-500/20' : 'bg-neutral-800'}`}>
+                                    <User className={currentRole === 'member' ? 'text-orange-500' : 'text-gray-400'} size={20} />
+                                </div>
+                                <div className="text-left">
+                                    <p className="font-medium text-white">Member</p>
+                                    <p className="text-xs text-gray-400">Standard access</p>
+                                </div>
+                            </button>
+
+                            <button onClick={() => setCurrentRole('owner')} className={`flex items-center gap-3 rounded-md border p-4 transition-all ${currentRole === 'owner' ? 'border-orange-500 bg-orange-500/10' : 'border-neutral-800 bg-[#0a0a0a] hover:border-neutral-700'}`}>
+                                <div className={`flex h-10 w-10 items-center justify-center rounded-full ${currentRole === 'owner' ? 'bg-orange-500/20' : 'bg-neutral-800'}`}>
+                                    <Shield className={currentRole === 'owner' ? 'text-orange-500' : 'text-gray-400'} size={20} />
+                                </div>
+                                <div className="text-left">
+                                    <p className="font-medium text-white">Team Leader</p>
+                                    <p className="text-xs text-gray-400">Full access</p>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button onClick={handleAddEmail} className="w-full cursor-pointer rounded-md border border-white px-6 py-2 text-white transition-colors hover:bg-[#ffffff1a]">
+                        Add Member
+                    </button>
+
+                    {emailError && <p className="text-sm text-red-400">{emailError}</p>}
                 </div>
 
                 {emails.length > 0 && (
@@ -123,10 +170,11 @@ const InviteMemberDialog = () => {
                             {emails.map(member => (
                                 <div key={member.id} className="flex items-center justify-between rounded-md border border-neutral-800 bg-[#1b1b1b] p-3 transition-colors hover:border-neutral-700">
                                     <div className="flex items-center gap-3">
-                                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-500/10">
-                                            <Mail className="text-orange-500" size={16} />
+                                        <div className={`flex h-8 w-8 items-center justify-center rounded-full ${member.role === 'owner' ? 'bg-orange-500/10' : 'bg-blue-500/10'}`}>{member.role === 'owner' ? <Shield className="text-orange-500" size={16} /> : <User className="text-blue-500" size={16} />}</div>
+                                        <div>
+                                            <p className="text-white">{member.email}</p>
+                                            <p className="text-xs text-gray-400">{member.role === 'owner' ? 'Team Leader' : 'Member'}</p>
                                         </div>
-                                        <span className="text-white">{member.email}</span>
                                     </div>
                                     <button onClick={() => handleRemoveEmail(member.id)} className="rounded p-1 text-gray-400 transition-colors hover:bg-neutral-800 hover:text-white">
                                         <X size={18} />
@@ -153,6 +201,7 @@ const InviteMemberDialog = () => {
                         onClick={() => {
                             setEmails([])
                             setCurrentEmail('')
+                            setCurrentRole('member')
                             setEmailError('')
                             setSuccessMessage('')
                         }}

@@ -88,19 +88,23 @@ const GetTeams = async (req: Request, res: Response) => {
 
     try {
         const teams = await db.query(
-            `SELECT 
+            `
+  SELECT 
     t.*, 
-    COUNT(tm.user_id) as member_count
+    COUNT(tm2.user_id) AS member_count
   FROM teams t
-  LEFT JOIN team_members tm ON t.id = tm.team_id
-  WHERE t.owner_user_id = (
+  JOIN team_members tm ON tm.team_id = t.id
+  LEFT JOIN team_members tm2 ON tm2.team_id = t.id
+  WHERE tm.user_id = (
     SELECT user_id 
     FROM sessions 
     WHERE access_token = $1
   )
-  GROUP BY t.id`,
+  GROUP BY t.id
+  `,
             [req.params.accessToken],
         );
+
 
         const formatedTeams = teams.rows.map((team) => {
             return {
@@ -190,20 +194,11 @@ const InviteUser = async (req: Request, res: Response) => {
 
         const { companyname, teamname, invitername } = result.rows[0];
 
-        const token = jwt.sign(
-            {
-                type: 'TEAM_INVITATION',
-                teamId: req.body.teamId,
-                invitedEmail: req.body.userEmail,
-                invitedBy: invitername,
-                role: req.body.role,
-                companyName: companyname,
-            },
-            process.env.CHANGE_GMAIL_SECRET as string,
-            { expiresIn: '7d' },
-        );
+        const invitations = req.body.invitations || [];
 
-        const inviteLink = `${process.env.FRONTEND_URL}/invitations/${token}`;
+        if (invitations.length === 0) {
+            return res.status(400).json({ error: 'No invitations provided' });
+        }
 
         const transporter = nodemailer.createTransport({
             service: 'gmail',
@@ -213,31 +208,150 @@ const InviteUser = async (req: Request, res: Response) => {
             },
         });
 
-        const mailOptions = {
-            from: `"Obtura" <${process.env.EMAIL_USERNAME}>`,
-            to: req.body.userEmail,
-            subject: `${invitername} invited you to join ${teamname} on Obtura`,
-            html: getTeamInvitationEmailTemplate(req.body.userEmail, invitername, teamname, companyname, inviteLink),
-        };
+        const invitationPromises = invitations.map(async (invitation: { email: string; role: string }) => {
+            const token = jwt.sign(
+                {
+                    type: 'TEAM_INVITATION',
+                    teamId: req.body.teamId,
+                    invitedEmail: invitation.email,
+                    invitedBy: invitername,
+                    role: invitation.role,
+                    companyName: companyname,
+                },
+                process.env.TEAM_INVITATION_SECRET as string,
+                { expiresIn: '7d' },
+            );
+            const insertPromises = invitations.map((invitation: { email: string; role: string }) =>
+                db.query('INSERT INTO team_invitations (team_id, email, role, invited_by, created_at) VALUES ($1, $2, $3, (SELECT user_id FROM sessions WHERE access_token = $4), NOW())', [
+                    req.body.teamId,
+                    invitation.email,
+                    invitation.role,
+                    req.body.accessToken,
+                ]),
+            );
+            await Promise.all(insertPromises);
 
-        await transporter.sendMail(mailOptions);
+            const inviteLink = `${process.env.FRONTEND_URL}/invitations/${token}`;
 
-        // TODO: Add team_invitations
-        // await db.query(
-        //     'INSERT INTO team_invitations (team_id, email, invited_by, created_at) VALUES ($1, $2, $3, $4, NOW())',
-        //     [req.body.teamId, req.body.userEmail, token, inviter_name]
-        // );
+            const mailOptions = {
+                from: `"Obtura" <${process.env.EMAIL_USERNAME}>`,
+                to: invitation.email,
+                subject: `${invitername} invited you to join ${teamname} on Obtura`,
+                html: getTeamInvitationEmailTemplate(invitation.email, invitername, teamname, companyname, inviteLink),
+            };
 
-        res.status(200).json({ success: true, message: 'Invitation sent successfully' });
+            return transporter.sendMail(mailOptions);
+        });
+
+        await Promise.all(invitationPromises);
+
+        res.status(200).json({
+            success: true,
+            message: `Invitations sent successfully to ${invitations.length} member(s)`,
+        });
     } catch (error) {
         console.error('Invite user error:', error);
         res.status(500).json({ error: 'Failed to send invitation' });
     }
 };
 
+const AcceptInvitation = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        errors.array().map((error) => {
+            logging.error('ACCEPT-INVITATION', error.errorMsg);
+        });
+
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    try {
+        const result = await db.query(
+            `
+    WITH user_data AS (
+        SELECT 
+            s.user_id,
+            u.email
+        FROM sessions s
+        JOIN users u ON u.id = s.user_id
+        WHERE s.access_token = $2
+    )
+    INSERT INTO team_members (team_id, user_id, role)
+    SELECT
+        $1,
+        user_data.user_id,
+        ti.role
+    FROM user_data
+    JOIN team_invitations ti 
+        ON ti.team_id = $1 
+       AND ti.email = user_data.email
+    RETURNING *;
+    `,
+            [req.body.teamId, req.body.accessToken],
+        );
+
+        await db.query('UPDATE team_invitations SET status=$1 WHERE team_id = $2 AND email = $3', ['accepted', req.body.teamId, result.rows[0].email]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Invitation not found or invalid access' });
+        }
+
+        res.status(200).json({ success: true, message: 'Invitation accepted successfully' });
+    } catch (error) {
+        console.error('Accept invitation error:', error);
+        res.status(500).json({ error: 'Failed to accept invitation' });
+    }
+};
+
+const GetTeamData = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        errors.array().map((error) => {
+            logging.error('GET-TEAM-DATA', error.errorMsg);
+        });
+
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    try {
+        const { teamId, accessToken } = req.params;
+
+        const result = await db.query(
+            `SELECT 
+                u.id,
+                u.name, 
+                u.email, 
+                tm.role,
+                t.name as teamName,
+                CASE WHEN u.id = s.user_id THEN true ELSE false END as is_you
+            FROM team_members as tm 
+            JOIN users u ON u.id = tm.user_id 
+            JOIN teams t ON t.id = tm.team_id
+            CROSS JOIN sessions s
+            WHERE tm.team_id = $1 
+                AND s.access_token = $2 
+                AND s.expires_at > NOW()`,
+            [teamId, accessToken],
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Team not found or invalid access token' });
+        }
+
+        res.status(200).json({
+            members: result.rows,
+        });
+    } catch (error) {
+        console.error('Get team data error:', error);
+        res.status(500).json({ error: 'Failed to fetch team data' });
+    }
+};
+
 export default {
     CreateTeam,
     GetTeams,
+    GetTeamData,
+    AcceptInvitation,
     UpdateTeam,
     DeleteTeam,
     InviteUser,

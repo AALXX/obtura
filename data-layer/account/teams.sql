@@ -40,6 +40,7 @@ CREATE TABLE team_invitations (
     email VARCHAR(255) NOT NULL,
     role team_role DEFAULT 'member',
     invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    status VARCHAR(50) DEFAULT 'pending',
     
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
