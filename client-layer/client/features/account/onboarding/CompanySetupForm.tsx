@@ -160,7 +160,7 @@ const CompanySetupForm: React.FC<CompanySetupFormProps> = ({ userEmail, userName
                                 />
                             </div>
 
-                            <button type="submit" className="flex w-full items-center justify-center gap-2 rounded bg-white py-3 font-medium text-black transition-colors hover:bg-gray-100">
+                            <button type="submit" className="flex w-full items-center justify-center gap-2 rounded bg-white py-3 font-medium text-black transition-colors hover:bg-gray-100 cursor-pointer">
                                 Continue to Subscription
                                 <ArrowRight className="h-4 w-4" />
                             </button>
@@ -234,7 +234,7 @@ const CompanySetupForm: React.FC<CompanySetupFormProps> = ({ userEmail, userName
                     <button onClick={() => setStep('company')} disabled={isLoading} className="rounded border border-neutral-800 bg-[#1b1b1b] px-6 py-3 font-medium text-white transition-colors hover:bg-neutral-900 disabled:opacity-50">
                         Back
                     </button>
-                    <button onClick={handleFinalSubmit} disabled={isLoading || !formData.subscriptionPlan} className="flex items-center gap-2 rounded bg-white px-6 py-3 font-medium text-black transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50">
+                    <button onClick={handleFinalSubmit} disabled={isLoading || !formData.subscriptionPlan} className="flex items-center gap-2 rounded bg-white px-6 py-3 font-medium text-black transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer">
                         {isLoading ? 'Setting up...' : 'Complete Setup'}
                         <ArrowRight className="h-4 w-4" />
                     </button>

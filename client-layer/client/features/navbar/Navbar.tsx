@@ -168,7 +168,7 @@ const NavBar = () => {
                                 )}
                             </div>
                         ) : (
-                            <Link href="/account" className="hidden items-center gap-2 rounded-md bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-700 sm:flex">
+                            <Link href="/account/login-register" className="hidden items-center gap-2 rounded-md bg-neutral-800 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-neutral-700 sm:flex">
                                 Sign In
                             </Link>
                         )}

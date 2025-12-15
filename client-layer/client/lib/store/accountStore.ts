@@ -35,7 +35,7 @@ export const useAccountStore = create<AccountState>(set => ({
             const response = await fetch('/api/account')
 
             if (!response.ok) {
-                throw new Error('Failed to fetch account')
+                return
             }
 
             const data = await response.json()

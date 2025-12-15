@@ -6,6 +6,7 @@ import InviteMemberDialog from './components/InviteMembersDialog'
 import { TeamMemberData } from './types/TeamTypes'
 import MemberActionMenu from './components/TeammembersMenu'
 import Link from 'next/link'
+import axios from 'axios'
 
 const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamName: string; accessToken: string }> = ({ members: initialMembers, teamId, teamName: initialTeamName, accessToken }) => {
     const [members, setMembers] = useState<TeamMemberData[]>(initialMembers)
@@ -26,15 +27,52 @@ const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamNam
         return (nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0)).toUpperCase()
     }
 
-    const handleRemoveMember = (memberId: string) => {
+    const handleRemoveMember = async (memberId: string) => {
+        const resp = await axios.request({
+            method: 'DELETE',
+            url: `${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/remove-member`,
+            data: {
+                accessToken: accessToken,
+                teamId: teamId,
+                userId: memberId
+            }
+        })
+
+        if (resp.status !== 200) {
+            window.alert('Failed to remove member')
+            return
+        }
         setMembers(members.filter(m => m.id !== memberId))
     }
 
-    const handlePromoteMember = (memberId: string) => {
+    const handlePromoteMember = async (memberId: string) => {
+        const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/promote-member`, {
+            accessToken: accessToken,
+            teamId: teamId,
+            userId: memberId,
+            role: 'owner'
+        })
+
+        if (resp.status !== 200) {
+            window.alert('Failed to promote member')
+            return
+        }
+
         setMembers(members.map(m => (m.id === memberId ? { ...m, role: 'owner' } : m)))
     }
 
-    const handleDemoteMember = (memberId: string) => {
+    const handleDemoteMember = async (memberId: string) => {
+        const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/promote-member`, {
+            accessToken: accessToken,
+            teamId: teamId,
+            userId: memberId,
+            role: 'member'
+        })
+
+        if (resp.status !== 200) {
+            window.alert('Failed to promote member')
+            return
+        }
         setMembers(members.map(m => (m.id === memberId ? { ...m, role: 'Member' } : m)))
     }
 

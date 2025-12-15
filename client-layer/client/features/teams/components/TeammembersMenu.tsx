@@ -1,7 +1,6 @@
 'use client'
 import React, { useState, useRef, useEffect } from 'react'
-import { UserPlus, Search, ArrowLeft, Edit2, Users, MoreVertical, Trash2, Crown, UserMinus } from 'lucide-react'
-import DialogCanvas from '@/common-components/DialogCanvas'
+import { MoreVertical, Trash2, Crown, UserMinus } from 'lucide-react'
 import { TeamMemberData } from '../types/TeamTypes'
 
 interface MemberActionMenuProps {
@@ -33,7 +32,7 @@ const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove, o
 
     return (
         <div className="relative" ref={menuRef}>
-            <button onClick={() => setIsOpen(!isOpen)} className="rounded p-1 text-gray-400 transition-colors hover:bg-zinc-800 hover:text-white">
+            <button onClick={() => setIsOpen(!isOpen)} className="rounded p-1 text-gray-400 transition-colors hover:bg-zinc-800 hover:text-white cursor-pointer">
                 <MoreVertical className="h-5 w-5" />
             </button>
 
@@ -45,7 +44,7 @@ const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove, o
                                 onPromote(member.id)
                                 setIsOpen(false)
                             }}
-                            className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-white transition-colors hover:bg-zinc-800"
+                            className="flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm text-white transition-colors hover:bg-zinc-800"
                         >
                             <Crown className="h-4 w-4 text-orange-500" />
                             Promote to Leader
@@ -58,7 +57,7 @@ const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove, o
                                 onDemote(member.id)
                                 setIsOpen(false)
                             }}
-                            className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-white transition-colors hover:bg-zinc-800"
+                            className="flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm text-white transition-colors hover:bg-zinc-800"
                         >
                             <UserMinus className="h-4 w-4 text-gray-400" />
                             Demote to Member
@@ -72,7 +71,7 @@ const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove, o
                             onRemove(member.id)
                             setIsOpen(false)
                         }}
-                        className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-red-500 transition-colors hover:bg-zinc-800"
+                        className="flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm text-red-500 transition-colors hover:bg-zinc-800"
                     >
                         <Trash2 className="h-4 w-4" />
                         Remove Member

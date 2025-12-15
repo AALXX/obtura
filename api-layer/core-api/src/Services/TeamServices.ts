@@ -105,7 +105,6 @@ const GetTeams = async (req: Request, res: Response) => {
             [req.params.accessToken],
         );
 
-
         const formatedTeams = teams.rows.map((team) => {
             return {
                 id: team.id,
@@ -268,35 +267,65 @@ const AcceptInvitation = async (req: Request, res: Response) => {
     try {
         const result = await db.query(
             `
-    WITH user_data AS (
-        SELECT 
-            s.user_id,
-            u.email
-        FROM sessions s
-        JOIN users u ON u.id = s.user_id
-        WHERE s.access_token = $2
-    )
-    INSERT INTO team_members (team_id, user_id, role)
-    SELECT
-        $1,
-        user_data.user_id,
-        ti.role
-    FROM user_data
-    JOIN team_invitations ti 
-        ON ti.team_id = $1 
-       AND ti.email = user_data.email
-    RETURNING *;
-    `,
+            WITH user_data AS (
+                SELECT 
+                    s.user_id,
+                    u.email
+                FROM sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.access_token = $2
+            )
+            INSERT INTO team_members (team_id, user_id, role)
+            SELECT
+                $1,
+                user_data.user_id,
+                ti.role
+            FROM user_data
+            JOIN team_invitations ti 
+                ON ti.team_id = $1 
+                AND ti.email = user_data.email
+                AND ti.status = 'pending'
+            RETURNING *;
+            `,
             [req.body.teamId, req.body.accessToken],
         );
 
-        await db.query('UPDATE team_invitations SET status=$1 WHERE team_id = $2 AND email = $3', ['accepted', req.body.teamId, result.rows[0].email]);
-
         if (result.rowCount === 0) {
-            return res.status(404).json({ error: 'Invitation not found or invalid access' });
+            return res.status(404).json({
+                error: 'Invitation not found, already accepted, or invalid access',
+            });
         }
 
-        res.status(200).json({ success: true, message: 'Invitation accepted successfully' });
+        const userID = result.rows[0].user_id;
+
+        const teamResult = await db.query(`SELECT company_id FROM teams WHERE id = $1`, [req.body.teamId]);
+
+        if (teamResult.rowCount === 0) {
+            return res.status(404).json({ error: 'Team not found' });
+        }
+
+        const companyId = teamResult.rows[0].company_id;
+
+        await db.query(
+            `
+            INSERT INTO company_users (company_id, user_id, role)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (company_id, user_id) DO NOTHING
+            `,
+            [companyId, userID, 'member'],
+        );
+
+        await db.query(
+            `UPDATE team_invitations 
+             SET status = $1, updated_at = NOW() 
+             WHERE team_id = $2 AND email = $3`,
+            ['accepted', req.body.teamId, result.rows[0].email],
+        );
+
+        res.status(200).json({
+            success: true,
+            message: 'Invitation accepted successfully',
+        });
     } catch (error) {
         console.error('Accept invitation error:', error);
         res.status(500).json({ error: 'Failed to accept invitation' });
@@ -347,12 +376,54 @@ const GetTeamData = async (req: Request, res: Response) => {
     }
 };
 
+const PromoteMember = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        errors.array().map((error) => {
+            logging.error('PROMOTE-MEMBER', error.errorMsg);
+        });
+
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    try {
+        await db.query('UPDATE team_members SET role=$1 WHERE team_id=$2 AND user_id=$3', [req.body.role, req.body.teamId, req.body.userId]);
+
+        res.status(200).json({ success: true, message: 'Member promoted successfully' });
+    } catch (error) {
+        console.error('Promote member error:', error);
+        res.status(500).json({ error: 'Failed to promote member' });
+    }
+};
+
+const RemoveMember = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        errors.array().map((error) => {
+            logging.error('REMOVE-MEMBER', error.errorMsg);
+        });
+
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    try {
+        await db.query('DELETE FROM team_members WHERE team_id=$1 AND user_id=$2', [req.body.teamId, req.body.userId]);
+
+        res.status(200).json({ success: true, message: 'Member removed successfully' });
+    } catch (error) {
+        console.error('Remove member error:', error);
+        res.status(500).json({ error: 'Failed to remove member' });
+    }
+};
+
 export default {
     CreateTeam,
     GetTeams,
     GetTeamData,
     AcceptInvitation,
+    PromoteMember,
     UpdateTeam,
     DeleteTeam,
+    RemoveMember,
     InviteUser,
 };

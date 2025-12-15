@@ -38,6 +38,8 @@ router.put(
     TeamServices.UpdateTeam,
 );
 
+router.delete('/delete-team', body('accessToken').notEmpty().withMessage('Access token is required').isString(), body('teamId').notEmpty().withMessage('Team ID is required').isString(), TeamServices.DeleteTeam);
+
 router.post(
     '/invite-members',
     body('accessToken').notEmpty().withMessage('Access token is required').isString(),
@@ -65,6 +67,21 @@ router.post(
     TeamServices.InviteUser,
 );
 
-router.delete('/delete-team', body('accessToken').notEmpty().withMessage('Access token is required').isString(), body('teamId').notEmpty().withMessage('Team ID is required').isString(), TeamServices.DeleteTeam);
+router.post(
+    '/promote-member',
+    body('accessToken').notEmpty().withMessage('Access token is required').isString(),
+    body('teamId').notEmpty().withMessage('Team ID is required').isString(),
+    body('userId').notEmpty().withMessage('User ID is required').isString(),
+    body('role').notEmpty().withMessage('Role is required').isIn(['owner', 'member']).withMessage('Role must be "owner" or "member"'),
+    TeamServices.PromoteMember,
+);
+
+router.delete(
+    '/remove-member',
+    body('accessToken').notEmpty().withMessage('Access token is required').isString(),
+    body('teamId').notEmpty().withMessage('Team ID is required').isString(),
+    body('userId').notEmpty().withMessage('User ID is required').isString(),
+    TeamServices.RemoveMember,
+);
 
 export = router;

@@ -193,8 +193,6 @@ const CompleteCompanySetup = async (req: Request, res: Response) => {
             [userId],
         );
 
-        console.log('CUM 1');
-
         if (existingCompany.rows.length > 0) {
             await dbClient.query('ROLLBACK');
             return res.status(400).json({
@@ -305,6 +303,18 @@ const CompleteCompanySetup = async (req: Request, res: Response) => {
     VALUES ($1, $2, 'active', NOW(), $3, 1, 0, 0, 0)
     `,
             [company.id, selectedPlan, periodEnd],
+        );
+
+        await dbClient.query(
+            `
+            INSERT INTO company_users (
+                company_id,
+                user_id,
+                role
+            )
+            VALUES ($1, $2, $3)
+            `,
+            [company.id, userId, userRole],
         );
 
         const subscriptionResult = await dbClient.query('SELECT id FROM subscriptions WHERE company_id = $1 ORDER BY created_at DESC LIMIT 1', [company.id]);

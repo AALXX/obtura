@@ -30,12 +30,10 @@ CREATE TABLE company_users (
     company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     role VARCHAR(50) DEFAULT 'member', -- 'owner', 'billing_admin', 'member'
-    invited_by UUID REFERENCES users(id),
-    invited_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (company_id, user_id)
 );
 
-
+-- TODO FIX
 CREATE VIEW company_usage_limits AS
 SELECT 
     c.id AS company_id,

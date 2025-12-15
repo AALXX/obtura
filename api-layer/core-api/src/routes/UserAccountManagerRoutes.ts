@@ -10,7 +10,6 @@ router.post('/register-account-google', body('idToken').not().isEmpty(), body('a
 
 router.get('/check-company-status/:accessToken', body('accessToken').not().isEmpty(), AccountRegistrationServices.CheckCompanyStatus);
 
-// In your routes file
 router.post(
     '/complete-company-setup',
     [
