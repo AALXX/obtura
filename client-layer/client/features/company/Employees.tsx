@@ -3,66 +3,10 @@ import React, { useState } from 'react'
 import { Search, Users, Plus, Mail, Phone, Building2 } from 'lucide-react'
 import { EmployeeData } from './types/EmplyeesTypes'
 import EmployeeCard from './components/EmplyeeCard'
+import DialogCanvas from '@/common-components/DialogCanvas'
+import InviteEmployeeDialog from './components/InviteEmployeeDialog'
 
-const CreateEmployeeDialog: React.FC<{ closeDialog: () => void }> = ({ closeDialog }) => {
-    const handleSubmit = () => {
-        // Handle form submission logic here
-        closeDialog()
-    }
-
-    return (
-        <div className="w-full max-w-md rounded-lg bg-[#1b1b1b] p-6">
-            <h2 className="mb-4 text-2xl font-bold text-white">Add New Employee</h2>
-            <div className="space-y-4">
-                <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-300">Full Name</label>
-                    <input type="text" className="w-full rounded-lg border border-zinc-800 bg-[#222] px-4 py-2 text-white focus:border-orange-500 focus:outline-none" placeholder="John Doe" />
-                </div>
-
-                <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-300">Email</label>
-                    <input type="email" className="w-full rounded-lg border border-zinc-800 bg-[#222] px-4 py-2 text-white focus:border-orange-500 focus:outline-none" placeholder="john.doe@company.com" />
-                </div>
-
-                <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-300">Position</label>
-                    <input type="text" className="w-full rounded-lg border border-zinc-800 bg-[#222] px-4 py-2 text-white focus:border-orange-500 focus:outline-none" placeholder="Software Engineer" />
-                </div>
-
-                <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-300">Department</label>
-                    <select className="w-full rounded-lg border border-zinc-800 bg-[#222] px-4 py-2 text-white focus:border-orange-500 focus:outline-none">
-                        <option>Engineering</option>
-                        <option>Product</option>
-                        <option>Design</option>
-                        <option>Marketing</option>
-                        <option>Sales</option>
-                    </select>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                    <button onClick={closeDialog} className="flex-1 rounded-lg border border-zinc-700 px-4 py-2 text-white transition-colors hover:bg-zinc-800">
-                        Cancel
-                    </button>
-                    <button onClick={handleSubmit} className="flex-1 rounded-lg bg-orange-500 px-4 py-2 text-white transition-colors hover:bg-orange-600">
-                        Add Employee
-                    </button>
-                </div>
-            </div>
-        </div>
-    )
-}
-
-// Dialog Canvas Component
-const DialogCanvas: React.FC<{ children: React.ReactNode; closeDialog: () => void }> = ({ children, closeDialog }) => {
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeDialog}>
-            <div onClick={e => e.stopPropagation()}>{children}</div>
-        </div>
-    )
-}
-
-const Employees: React.FC<{ employeesInitial: EmployeeData[] }> = ({ employeesInitial }) => {
+const Employees: React.FC<{ employeesInitial: EmployeeData[]; accessToken: string }> = ({ employeesInitial, accessToken }) => {
     const [searchQuery, setSearchQuery] = useState('')
     const [employees] = useState<EmployeeData[]>(employeesInitial)
     const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -70,7 +14,7 @@ const Employees: React.FC<{ employeesInitial: EmployeeData[] }> = ({ employeesIn
     const filteredEmployees = employees.filter(employee => employee.name.toLowerCase().includes(searchQuery.toLowerCase()) || employee.email.toLowerCase().includes(searchQuery.toLowerCase()) || employee.rolename.toLowerCase().includes(searchQuery.toLowerCase()) || employee.teamname!.toLowerCase().includes(searchQuery.toLowerCase()))
 
     return (
-        <div className="min-h-screen ztext-white">
+        <div className="ztext-white min-h-screen">
             <div className="container mx-auto px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
                 <div className="mb-8 flex items-start justify-between">
                     <div>
@@ -90,7 +34,7 @@ const Employees: React.FC<{ employeesInitial: EmployeeData[] }> = ({ employeesIn
 
                 {showCreateDialog && (
                     <DialogCanvas closeDialog={() => setShowCreateDialog(false)}>
-                        <CreateEmployeeDialog closeDialog={() => setShowCreateDialog(false)} />
+                        <InviteEmployeeDialog accessToken={accessToken} />
                     </DialogCanvas>
                 )}
 

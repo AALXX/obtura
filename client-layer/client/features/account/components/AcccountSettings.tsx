@@ -82,7 +82,6 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ name, email, image, a
             const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_SERVER}/api/user-account-manager/get-change-password-link`, {
                 accessToken: accessToken
             })
-            console.log(resp.data)
         } catch (error) {
             console.error('Error getting password change link:', error)
         }
@@ -141,7 +140,6 @@ const AccountSettings: React.FC<AccountSettingsProps> = ({ name, email, image, a
     const handleDeleteAccount = async () => {
         if (confirm('Are you absolutely sure? This action cannot be undone. This will permanently delete your account and remove all your data from our servers.')) {
             try {
-                console.log('Deleting account')
                 const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/account-manager/delete-account`, {
                     accessToken
                 })

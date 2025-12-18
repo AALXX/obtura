@@ -18,7 +18,6 @@ const TeamDetailsPage: React.FC<{ params: { TeamId: string } }> = async ({ param
         }
         const companyStatus = await apiClient.get<{ hasCompany: boolean }>(`${process.env.BACKEND_URL}/company-manager/check-company-status/${session.backendToken}`)
 
-        console.log(companyStatus)
 
         if (!companyStatus.data.hasCompany) {
             return <CompanyRequired featureAccess="projects" />

@@ -2,7 +2,7 @@
 import React, { useState } from 'react'
 import { UserPlus, Search, ArrowLeft, Edit2, Users, MoreHorizontal, MoreVertical } from 'lucide-react'
 import DialogCanvas from '@/common-components/DialogCanvas'
-import InviteMemberDialog from './components/InviteMembersDialog'
+import AddMemberDialog from './components/AddMembersDialog'
 import { TeamMemberData } from './types/TeamTypes'
 import MemberActionMenu from './components/TeamMembersMenu'
 import Link from 'next/link'
@@ -36,41 +36,12 @@ const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamNam
         setMembers(members.filter(m => m.id !== memberId))
     }
 
-    const handlePromoteMember = async (memberId: string) => {
-        const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/promote-member`, {
-            accessToken: accessToken,
-            teamId: teamId,
-            userId: memberId,
-            role: 'owner'
-        })
-
-        if (resp.status !== 200) {
-            window.alert('Failed to promote member')
-            return
-        }
-
-        setMembers(members.map(m => (m.id === memberId ? { ...m, role: 'owner' } : m)))
-    }
-
-    const handleDemoteMember = async (memberId: string) => {
-        const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/promote-member`, {
-            accessToken: accessToken,
-            teamId: teamId,
-            userId: memberId,
-            role: 'member'
-        })
-
-        if (resp.status !== 200) {
-            window.alert('Failed to promote member')
-            return
-        }
-        setMembers(members.map(m => (m.id === memberId ? { ...m, role: 'Member' } : m)))
+    const handleMembersAdded = (newMembers: TeamMemberData[]) => {
+        setMembers(prevMembers => [...prevMembers, ...newMembers])
+        setShowInviteMembersDialog(false)
     }
 
     const filteredMembers = members.filter(member => member.name.toLowerCase().includes(searchQuery.toLowerCase()) || member.email.toLowerCase().includes(searchQuery.toLowerCase()))
-
-    // const teamLeaders = members.filter(m => m.role === 'owner').length
-    // const regularMembers = members.filter(m => m.role === 'member').length
 
     return (
         <div className="min-h-screen p-8 text-white">
@@ -125,7 +96,7 @@ const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamNam
 
                 {showInviteMembersDialog && (
                     <DialogCanvas closeDialog={() => setShowInviteMembersDialog(false)}>
-                        <InviteMemberDialog accessToken={accessToken} teamId={teamId} />
+                        <AddMemberDialog accessToken={accessToken} teamId={teamId} onMembersAdded={handleMembersAdded} />
                     </DialogCanvas>
                 )}
 
@@ -151,7 +122,7 @@ const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamNam
                             </div>
                             <div className="ml-auto flex items-center gap-2">
                                 {member.can_edit ? <span className="rounded-lg bg-orange-500 px-4 py-1.5 text-sm font-medium text-white">{member.rolename}</span> : <span className="rounded-lg bg-zinc-800 px-4 py-1.5 text-sm text-gray-400">{member.rolename}</span>}
-                                {!member.is_you && currentUser?.can_edit && <MemberActionMenu member={member} onRemove={handleRemoveMember} onPromote={handlePromoteMember} onDemote={handleDemoteMember} />}
+                                {!member.is_you && currentUser?.can_edit && <MemberActionMenu member={member} onRemove={handleRemoveMember} />}
                             </div>
                         </div>
                     ))}

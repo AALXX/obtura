@@ -6,11 +6,9 @@ import { TeamMemberData } from '../types/TeamTypes'
 interface MemberActionMenuProps {
     member: TeamMemberData
     onRemove: (memberId: string) => void
-    onPromote: (memberId: string) => void
-    onDemote: (memberId: string) => void
 }
 
-const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove, onPromote, onDemote }) => {
+const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove }) => {
     const [isOpen, setIsOpen] = useState(false)
     const menuRef = useRef<HTMLDivElement>(null)
 
@@ -38,34 +36,6 @@ const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove, o
 
             {isOpen && (
                 <div className="absolute top-full right-0 z-10 mt-2 w-48 rounded-lg border border-zinc-800 bg-[#1b1b1b] py-2 shadow-xl">
-                    {member.can_edit && (
-                        <button
-                            onClick={() => {
-                                onPromote(member.id)
-                                setIsOpen(false)
-                            }}
-                            className="flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm text-white transition-colors hover:bg-zinc-800"
-                        >
-                            <Crown className="h-4 w-4 text-orange-500" />
-                            Promote to Leader
-                        </button>
-                    )}
-
-                    {member.can_edit && (
-                        <button
-                            onClick={() => {
-                                onDemote(member.id)
-                                setIsOpen(false)
-                            }}
-                            className="flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm text-white transition-colors hover:bg-zinc-800"
-                        >
-                            <UserMinus className="h-4 w-4 text-gray-400" />
-                            Demote to Member
-                        </button>
-                    )}
-
-                    <div className="my-1 border-t border-zinc-800"></div>
-
                     <button
                         onClick={() => {
                             onRemove(member.id)

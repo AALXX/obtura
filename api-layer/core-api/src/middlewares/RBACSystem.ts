@@ -9,17 +9,18 @@ export interface User {
     name: string;
 }
 
-export interface TeamMember {
-    id: string;
-    teamId: string;
+export interface CompanyEmployee {
+    userId: string;
+    companyId: string;
     role: TeamRole;
+    roleId: string;
     permissions: Set<string>;
 }
 
 export interface AuthenticatedRequest extends Request {
     accessToken?: string;
     user?: User;
-    teamMember?: TeamMember;
+    companyEmployee?: CompanyEmployee;
 }
 
 const permissionCache = new Map<string, { permissions: Set<string>; expiry: number }>();
@@ -54,24 +55,35 @@ export const createRBACMiddleware = (pool: Pool) => {
         }
     };
 
-    const loadTeamMember = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const loadCompanyEmployee = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
         try {
             if (!req.user) {
                 return res.status(401).json({ message: 'Not authenticated' });
             }
 
-            const teamId = req.body?.teamId || req.params?.teamId || req.query?.teamId;
-            if (!teamId) {
-                return res.status(400).json({ message: 'Team ID required' });
+            const getUsersCompany = await pool.query(
+                `
+                SELECT cu.company_id as companyId
+                FROM company_users cu
+                WHERE cu.user_id = $1
+                LIMIT 1
+            `,
+                [req.user.id],
+            );
+
+            const companyId = getUsersCompany.rows[0].companyid;
+            if (!companyId) {
+                return res.status(400).json({ message: 'Company ID required' });
             }
 
-            const cacheKey = `${req.user.id}:${teamId}`;
+            const cacheKey = `${req.user.id}:${companyId}`;
             const cached = permissionCache.get(cacheKey);
             if (cached && cached.expiry > Date.now()) {
-                req.teamMember = {
-                    id: '',
-                    teamId,
+                req.companyEmployee = {
+                    userId: req.user.id,
+                    companyId,
                     role: '' as TeamRole,
+                    roleId: '',
                     permissions: cached.permissions,
                 };
                 return next();
@@ -79,31 +91,26 @@ export const createRBACMiddleware = (pool: Pool) => {
 
             const result = await pool.query(
                 `SELECT 
-                    tm.id, 
-                    cu.role,
+                    cu.user_id,
+                    cu.company_id,
+                    cu.role as role_id,
+                    r.name as role_name,
                     COALESCE(
                         json_agg(DISTINCT jsonb_build_object('resource', p.resource, 'action', p.action)) 
                         FILTER (WHERE p.id IS NOT NULL), 
                         '[]'
-                    ) as role_permissions,
-                    COALESCE(
-                        json_agg(DISTINCT jsonb_build_object('resource', p2.resource, 'action', p2.action, 'granted', tmp.is_granted)) 
-                        FILTER (WHERE p2.id IS NOT NULL), 
-                        '[]'
-                    ) as custom_permissions
-                FROM team_members tm
-                LEFT JOIN company_users cu ON cu.user_id = tm.user_id
-                LEFT JOIN role_permissions rp ON rp.role_name = (SELECT name FROM roles WHERE id = cu.role)
+                    ) as role_permissions
+                FROM company_users cu
+                JOIN roles r ON r.id = cu.role
+                LEFT JOIN role_permissions rp ON rp.role_name = r.name
                 LEFT JOIN permissions p ON p.id = rp.permission_id
-                LEFT JOIN team_member_permissions tmp ON tmp.team_member_id = tm.id
-                LEFT JOIN permissions p2 ON p2.id = tmp.permission_id
-                WHERE tm.user_id = $1 AND tm.team_id = $2
-                GROUP BY tm.id, cu.role`,
-                [req.user.id, teamId],
+                WHERE cu.user_id = $1 AND cu.company_id = $2
+                GROUP BY cu.user_id, cu.company_id, cu.role, r.name`,
+                [req.user.id, companyId],
             );
 
             if (result.rows.length === 0) {
-                return res.status(403).json({ message: 'Not a team member' });
+                return res.status(403).json({ message: 'Not a company employee' });
             }
 
             const row = result.rows[0];
@@ -113,39 +120,29 @@ export const createRBACMiddleware = (pool: Pool) => {
                 permissions.add(`${p.resource}:${p.action}`);
             });
 
-            row.custom_permissions.forEach((p: any) => {
-                const key = `${p.resource}:${p.action}`;
-                if (p.granted) {
-                    permissions.add(key);
-                } else {
-                    permissions.delete(key);
-                }
-            });
-
-            console.log(permissions);
-
             permissionCache.set(cacheKey, { permissions, expiry: Date.now() + CACHE_TTL });
-            req.teamMember = {
-                id: row.id,
-                teamId,
-                role: row.role as TeamRole,
+            req.companyEmployee = {
+                userId: row.user_id,
+                companyId: row.company_id,
+                role: row.role_name as TeamRole,
+                roleId: row.role_id,
                 permissions,
             };
             next();
         } catch (error) {
-            console.error('Load team member error:', error);
-            res.status(500).json({ message: 'Failed to load team member' });
+            console.error('Load company employee error:', error);
+            res.status(500).json({ message: 'Failed to load company employee' });
         }
     };
 
     const requirePermission = (resource: PermissionResource, action: PermissionAction) => {
         return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-            if (!req.teamMember) {
-                return res.status(403).json({ message: 'No team context' });
+            if (!req.companyEmployee) {
+                return res.status(403).json({ message: 'No company context' });
             }
 
             const key = `${resource}:${action}`;
-            if (!req.teamMember.permissions.has(key)) {
+            if (!req.companyEmployee.permissions.has(key)) {
                 return res.status(403).json({
                     message: 'Insufficient permissions',
                     required: { resource, action },
@@ -157,7 +154,7 @@ export const createRBACMiddleware = (pool: Pool) => {
 
     const canManageUser = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
         try {
-            if (!req.user || !req.teamMember) {
+            if (!req.user || !req.companyEmployee) {
                 return res.status(401).json({ message: 'Not authenticated' });
             }
 
@@ -168,21 +165,21 @@ export const createRBACMiddleware = (pool: Pool) => {
 
             const result = await pool.query(
                 `SELECT 
-                    r1.hierarchy_level as actorLevel, 
-                    r2.hierarchy_level as targetLevel
-                FROM team_members tm1 
-                JOIN roles r1 ON r1.name = tm1.role
-                CROSS JOIN team_members tm2 
-                JOIN roles r2 ON r2.name = tm2.role
-                WHERE tm1.user_id = $1 
-                    AND tm1.team_id = $2 
-                    AND tm2.user_id = $3 
-                    AND tm2.team_id = $2`,
-                [req.user.id, req.teamMember.teamId, targetUserId],
+                    r1.hierarchy_level as actor_level, 
+                    r2.hierarchy_level as target_level
+                FROM company_users cu1
+                JOIN roles r1 ON r1.id = cu1.role
+                CROSS JOIN company_users cu2 
+                JOIN roles r2 ON r2.id = cu2.role
+                WHERE cu1.user_id = $1 
+                    AND cu1.company_id = $2 
+                    AND cu2.user_id = $3 
+                    AND cu2.company_id = $2`,
+                [req.user.id, req.companyEmployee.companyId, targetUserId],
             );
 
             if (result.rows.length === 0) {
-                return res.status(403).json({ message: 'Target user not found in team' });
+                return res.status(403).json({ message: 'Target user not found in company' });
             }
 
             const { actorLevel, targetLevel } = result.rows[0];
@@ -200,9 +197,37 @@ export const createRBACMiddleware = (pool: Pool) => {
         }
     };
 
-    const clearCache = (userId?: string, teamId?: string) => {
-        if (userId && teamId) {
-            permissionCache.delete(`${userId}:${teamId}`);
+    const isCompanyOwner = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+        try {
+            if (!req.user || !req.companyEmployee) {
+                return res.status(401).json({ message: 'Not authenticated' });
+            }
+
+            const result = await pool.query(
+                `SELECT owner_user_id 
+                FROM companies 
+                WHERE id = $1`,
+                [req.companyEmployee.companyId],
+            );
+
+            if (result.rows.length === 0) {
+                return res.status(404).json({ message: 'Company not found' });
+            }
+
+            if (result.rows[0].owner_user_id !== req.user.id) {
+                return res.status(403).json({ message: 'Only company owner can perform this action' });
+            }
+
+            next();
+        } catch (error) {
+            console.error('Owner check error:', error);
+            res.status(500).json({ message: 'Owner check failed' });
+        }
+    };
+
+    const clearCache = (userId?: string, companyId?: string) => {
+        if (userId && companyId) {
+            permissionCache.delete(`${userId}:${companyId}`);
         } else {
             permissionCache.clear();
         }
@@ -210,9 +235,10 @@ export const createRBACMiddleware = (pool: Pool) => {
 
     return {
         authenticate,
-        loadTeamMember,
+        loadCompanyEmployee,
         requirePermission,
         canManageUser,
+        isCompanyOwner,
         clearCache,
     };
 };

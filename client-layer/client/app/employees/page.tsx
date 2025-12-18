@@ -25,7 +25,7 @@ const EmployeesPage = async () => {
 
         return (
             <div>
-                <Employees employeesInitial={employeeData.data.employees} />
+                <Employees employeesInitial={employeeData.data.employees} accessToken={session.backendToken!} />
             </div>
         )
     } catch (error) {

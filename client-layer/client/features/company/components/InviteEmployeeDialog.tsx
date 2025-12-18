@@ -62,7 +62,7 @@ interface InviteMember {
     id: string
 }
 
-const InviteMemberDialog: React.FC<{ accessToken: string; teamId: string }> = ({ accessToken, teamId }) => {
+const InviteEmployeeDialog: React.FC<{ accessToken: string }> = ({ accessToken }) => {
     const [emails, setEmails] = useState<InviteMember[]>([])
     const [currentEmail, setCurrentEmail] = useState('')
     const [currentRole, setCurrentRole] = useState<TeamRole>(TeamRole.DEVELOPER)
@@ -121,9 +121,8 @@ const InviteMemberDialog: React.FC<{ accessToken: string; teamId: string }> = ({
         setSuccessMessage('')
 
         try {
-            const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/invite-members`, {
+            const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/company-manager/invite-employees`, {
                 accessToken: accessToken,
-                teamId: teamId,
                 invitations: emails.map(e => ({
                     email: e.email,
                     role: e.role,
@@ -165,7 +164,7 @@ const InviteMemberDialog: React.FC<{ accessToken: string; teamId: string }> = ({
             <div className="pb-4">
                 <div className="flex items-center gap-2 text-2xl font-bold text-white">
                     <UserPlus className="h-6 w-6" />
-                    Invite Team Members
+                    Invite  Members
                 </div>
                 <p className="text-gray-300">Send invitations to join your team</p>
             </div>
@@ -308,4 +307,4 @@ const InviteMemberDialog: React.FC<{ accessToken: string; teamId: string }> = ({
     )
 }
 
-export default InviteMemberDialog
+export default InviteEmployeeDialog

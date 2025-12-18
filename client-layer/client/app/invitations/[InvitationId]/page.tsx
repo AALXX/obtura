@@ -2,11 +2,11 @@ import { auth } from '@/features/account/auth/auth'
 import AuthRequired from '@/common-components/AuthRequredForm'
 import axios from 'axios'
 import CompanyRequired from '@/common-components/CompayRequired'
-import TeamInvitation from '@/features/teams/TeamInvitation'
+import CompanyInvitation from '@/features/company/components/CompanyInvitation'
 import { AlertCircle } from 'lucide-react'
 import jwt from 'jsonwebtoken'
-import { InvitationData } from '@/features/teams/types/TeamTypes'
 import { apiClient } from '@/lib/utils'
+import { InvitationData } from '@/features/company/types/InvitationTypes'
 
 interface InvitationPageProps {
     params: {
@@ -33,7 +33,7 @@ const Invitation = async ({ params }: InvitationPageProps) => {
 
         return (
             <div>
-                <TeamInvitation invitationData={invitationData as InvitationData} accessToken={session.backendToken!} />
+                <CompanyInvitation invitationData={invitationData as InvitationData} accessToken={session.backendToken!} />
             </div>
         )
     } catch (error) {

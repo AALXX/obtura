@@ -2,7 +2,9 @@ import { Request, Response } from 'express';
 import logging from '../config/logging';
 import { CustomRequestValidationResult } from '../common/comon';
 import db from '../config/postgresql';
-import { getUserIdFromSessionToken } from '../lib/utils';
+import { getCompanyInvitationEmailTemplate } from '../config/HTML_email_Templates';
+import nodemailer from 'nodemailer';
+import jwt from 'jsonwebtoken';
 
 const CompleteCompanySetup = async (req: Request, res: Response) => {
     const errors = CustomRequestValidationResult(req);
@@ -17,7 +19,6 @@ const CompleteCompanySetup = async (req: Request, res: Response) => {
     const { companyName, companySize, accessToken, industry, userRole, subscriptionPlan, billingEmail, vatNumber, addressLine1, city, country, dataRegion, dpaSigned } = req.body;
     const dbClient = await db.connect();
 
-    console.log(req.body);
 
     try {
         await dbClient.query('BEGIN');
@@ -250,43 +251,41 @@ const CheckCompanyStatus = async (req: Request, res: Response) => {
     try {
         const result = await db.query(
             `
-            SELECT 
-                u.id,
-                u.email,
-                u.name,
-                EXISTS (
-                    SELECT 1 
-                    FROM companies c
-                    WHERE c.owner_user_id = u.id
-                    OR EXISTS (
-                        SELECT 1 
-                        FROM teams t
-                        JOIN team_members tm ON tm.team_id = t.id
-                        WHERE t.company_id = c.id 
-                        AND tm.user_id = u.id
-                    )
-                ) as has_company,
-                (
-                    SELECT c.id 
-                    FROM companies c
-                    WHERE c.owner_user_id = u.id
-                    OR EXISTS (
-                        SELECT 1 
-                        FROM teams t
-                        JOIN team_members tm ON tm.team_id = t.id
-                        WHERE t.company_id = c.id 
-                        AND tm.user_id = u.id
-                    )
-                    ORDER BY 
-                        CASE WHEN c.owner_user_id = u.id THEN 0 ELSE 1 END,
-                        c.created_at DESC
-                    LIMIT 1
-                ) as company_id
-            FROM sessions s
-            JOIN users u ON u.id = s.user_id
-            WHERE s.access_token = $1
-            AND s.expires_at > NOW()
-            `,
+    SELECT 
+        u.id,
+        u.email,
+        u.name,
+        EXISTS (
+            SELECT 1 
+            FROM companies c
+            WHERE c.owner_user_id = u.id
+            OR EXISTS (
+                SELECT 1 
+                FROM company_users cu
+                WHERE cu.company_id = c.id 
+                AND cu.user_id = u.id
+            )
+        ) as has_company,
+        (
+            SELECT c.id 
+            FROM companies c
+            WHERE c.owner_user_id = u.id
+            OR EXISTS (
+                SELECT 1 
+                FROM company_users cu
+                WHERE cu.company_id = c.id 
+                AND cu.user_id = u.id
+            )
+            ORDER BY 
+                CASE WHEN c.owner_user_id = u.id THEN 0 ELSE 1 END,
+                c.created_at DESC
+            LIMIT 1
+        ) as company_id
+    FROM sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.access_token = $1
+    AND s.expires_at > NOW()
+    `,
             [req.params.accessToken],
         );
 
@@ -364,4 +363,215 @@ ORDER BY r.hierarchy_level ASC, u.name ASC;
     }
 };
 
-export default { CompleteCompanySetup, CheckCompanyStatus, GetEmployees };
+const InviteUser = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        errors.array().map((error) => {
+            logging.error('INVITE-USER', error.errorMsg);
+        });
+
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+    try {
+        const result = await db.query(
+            `SELECT 
+            c.id as companyId,
+            c.name as companyName,
+                u.name as inviterName
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            JOIN company_users cu ON cu.user_id = u.id
+            JOIN companies c ON c.id = cu.company_id
+            WHERE s.user_id = (SELECT user_id FROM sessions WHERE access_token = $1 LIMIT 1)
+            LIMIT 1`,
+            [req.body.accessToken],
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Company not found or invalid access' });
+        }
+
+        const { companyid, companyname, invitername } = result.rows[0];
+
+        const invitations = req.body.invitations || [];
+
+        if (invitations.length === 0) {
+            return res.status(400).json({ error: 'No invitations provided' });
+        }
+
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USERNAME,
+                pass: process.env.EMAIL_PASS,
+            },
+        });
+
+        const invitationPromises = invitations.map(async (invitation: { email: string; role: string; roleName: string }) => {
+            const token = jwt.sign(
+                {
+                    type: 'COMPANY_INVITATION',
+                    companyId: companyid,
+                    invitedEmail: invitation.email,
+                    invitedBy: invitername,
+                    role: invitation.roleName,
+                    companyName: companyname,
+                },
+                process.env.TEAM_INVITATION_SECRET as string,
+                { expiresIn: '7d' },
+            );
+            const insertPromises = invitations.map((invitation: { email: string; role: string }) =>
+                db.query(
+                    'INSERT INTO company_invitations (company_id, email, role_id, invited_by, created_at) VALUES ($1, $2, (SELECT id FROM roles WHERE name = $3), (SELECT user_id FROM sessions WHERE access_token = $4), NOW())',
+                    [companyid, invitation.email, invitation.role, req.body.accessToken],
+                ),
+            );
+            await Promise.all(insertPromises);
+
+            const inviteLink = `${process.env.FRONTEND_URL}/invitations/${token}`;
+
+            const mailOptions = {
+                from: `"Obtura" <${process.env.EMAIL_USERNAME}>`,
+                to: invitation.email,
+                subject: `${invitername} invited you to join ${companyname} on Obtura`,
+                html: getCompanyInvitationEmailTemplate(invitation.email, invitername, companyname, inviteLink, invitation.roleName),
+            };
+
+            return transporter.sendMail(mailOptions);
+        });
+
+        await Promise.all(invitationPromises);
+
+        res.status(200).json({
+            success: true,
+            message: `Invitations sent successfully to ${invitations.length} member(s)`,
+        });
+    } catch (error) {
+        console.error('Invite user error:', error);
+        res.status(500).json({ error: 'Failed to send invitation' });
+    }
+};
+
+const AcceptInvitation = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    const client = await db.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        const userResult = await client.query(
+            `
+            SELECT u.id AS userid, u.email
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.access_token = $1
+            `,
+            [req.body.accessToken],
+        );
+
+        if (userResult.rowCount === 0) {
+            return res.status(404).json({ error: 'User not found or invalid access' });
+        }
+
+        const { userid, email } = userResult.rows[0];
+
+        const invitationResult = await client.query(
+            `
+            SELECT id, role_id as roleId 
+            FROM company_invitations
+            WHERE company_id = $1
+              AND email = $2
+              AND status = 'pending'
+            ORDER BY created_at DESC
+            LIMIT 1
+            `,
+            [req.body.companyId, email],
+        );
+
+        if (invitationResult.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({
+                error: 'Invitation not found or already accepted',
+            });
+        }
+
+        const { id: invitationId, roleid } = invitationResult.rows[0];
+
+        await client.query(
+            `
+            INSERT INTO company_users (company_id, user_id, role)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (company_id, user_id) DO NOTHING
+            `,
+            [req.body.companyId, userid, roleid],
+        );
+
+        await client.query(
+            `
+            UPDATE company_invitations
+            SET status = 'accepted', updated_at = NOW()
+            WHERE id = $1
+            `,
+            [invitationId],
+        );
+
+        await client.query('COMMIT');
+
+        res.status(200).json({
+            success: true,
+            message: 'Invitation accepted successfully',
+        });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Accept invitation error:', error);
+        res.status(500).json({ error: 'Failed to accept invitation' });
+    } finally {
+        client.release();
+    }
+};
+
+const SearchUsers = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    try {
+        const users = await db.query(
+            `
+            SELECT u_company.id, u_company.name, u_company.email, u_company.phone_number as phone, 
+                   r.display_name AS roleName, r.hierarchy_level
+            FROM sessions s
+            JOIN users u ON u.id = s.user_id
+            JOIN company_users cu_requester ON cu_requester.user_id = s.user_id
+            JOIN company_users cu ON cu.company_id = cu_requester.company_id
+            JOIN users u_company ON u_company.id = cu.user_id
+            JOIN roles r ON r.id = cu.role
+            WHERE s.access_token = $1 
+            AND u_company.status = 'active'
+            AND u_company.id != s.user_id
+            AND (
+                u_company.name ILIKE $2 
+                OR u_company.email ILIKE $2 
+                OR r.display_name ILIKE $2
+            )
+            ORDER BY u_company.name ASC
+            `,
+            [req.params.accessToken, `%${req.params.searchTerm}%`],
+        );
+
+        res.status(200).json({
+            success: true,
+            usersData: users.rows,
+        });
+    } catch (error) {
+        console.error('Search users error:', error);
+        res.status(500).json({ error: 'Failed to search users' });
+    }
+};
+
+export default { CompleteCompanySetup, CheckCompanyStatus, GetEmployees, InviteUser, AcceptInvitation, SearchUsers };

@@ -2,16 +2,9 @@
 import React, { useState, useEffect } from 'react'
 import { Users, Mail, CheckCircle, XCircle, Loader2, AlertCircle, Shield, AtSign } from 'lucide-react'
 import axios from 'axios'
+import { InvitationData } from '../types/InvitationTypes'
 
-interface InvitationData {
-    teamId: string
-    companyName: string
-    invitedBy: string
-    role: string
-    invitedEmail: string
-}
-
-const TeamInvitation: React.FC<{ invitationData: InvitationData; accessToken?: string }> = ({ invitationData: invitationData, accessToken }) => {
+const CompanyInvitation: React.FC<{ invitationData: InvitationData; accessToken?: string }> = ({ invitationData: invitationData, accessToken }) => {
     const [error, setError] = useState<string | null>(null)
     const [accepting, setAccepting] = useState(false)
     const [success, setSuccess] = useState(false)
@@ -20,9 +13,9 @@ const TeamInvitation: React.FC<{ invitationData: InvitationData; accessToken?: s
     const handleAccept = async () => {
         setAccepting(true)
         try {
-            const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/teams-manager/accept-invitation`, {
+            const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/company-manager/accept-invitation`, {
                 accessToken: accessToken,
-                teamId: invitationData?.teamId
+                companyId: invitationData?.companyId
             })
 
             if (resp.status !== 200) {
@@ -32,7 +25,7 @@ const TeamInvitation: React.FC<{ invitationData: InvitationData; accessToken?: s
 
             setSuccess(true)
             setTimeout(() => {
-                window.location.href = `/team/${invitationData?.teamId}`
+                window.location.href = `/team`
             }, 2000)
         } catch (err) {
             setError('Failed to accept invitation. Please try again.')
@@ -94,8 +87,8 @@ const TeamInvitation: React.FC<{ invitationData: InvitationData; accessToken?: s
                     <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-lg bg-orange-500/10">
                         <Users className="h-8 w-8 text-orange-500" />
                     </div>
-                    <h1 className="mb-2 text-3xl font-bold text-white">Team Invitation</h1>
-                    <p className="text-gray-400">You've been invited to join a team</p>
+                    <h1 className="mb-2 text-3xl font-bold text-white">{invitationData?.companyName} Invitation</h1>
+                    <p className="text-gray-400">You've been invited to join a company</p>
                 </div>
 
                 <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-8">
@@ -155,4 +148,4 @@ const TeamInvitation: React.FC<{ invitationData: InvitationData; accessToken?: s
         </div>
     )
 }
-export default TeamInvitation
+export default CompanyInvitation

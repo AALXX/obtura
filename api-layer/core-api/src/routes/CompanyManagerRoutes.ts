@@ -23,12 +23,26 @@ router.post(
     CompanyServices.CompleteCompanySetup,
 );
 
+router.get('/search-users/:accessToken/:searchTerm', param('searchTerm').not().isEmpty(), param('accessToken').not().isEmpty(), CompanyServices.SearchUsers);
+
+router.post(
+    '/invite-employees',
+    body('accessToken').notEmpty().isString(),
+    body('invitations').notEmpty().isArray({ min: 1 }),
+    rbac.authenticate,
+    rbac.loadCompanyEmployee,
+    rbac.requirePermission(PermissionResource.MEMBERS, PermissionAction.INVITE),
+    CompanyServices.InviteUser,
+);
+
+router.post('/accept-invitation', body('accessToken').notEmpty().isString(), body('companyId').notEmpty().isString(), rbac.authenticate, CompanyServices.AcceptInvitation);
+
 router.get(
     '/get-employees/:accessToken',
     param('accessToken').not().isEmpty().withMessage('Access token is required'),
-    // rbac.authenticate,
-    // rbac.loadTeamMember,
-    // rbac.requirePermission(PermissionResource.TEAM, PermissionAction.READ),
+    rbac.authenticate,
+    rbac.loadCompanyEmployee,
+    rbac.requirePermission(PermissionResource.MEMBERS, PermissionAction.READ),
     CompanyServices.GetEmployees,
 );
 

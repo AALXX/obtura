@@ -28,17 +28,7 @@ CREATE TABLE
         UNIQUE (team_id, user_id)
     );
 
-CREATE TABLE
-    team_invitations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
-        team_id UUID NOT NULL REFERENCES teams (id) ON DELETE CASCADE,
-        email VARCHAR(255) NOT NULL,
-        role UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-        invited_by UUID REFERENCES users (id) ON DELETE SET NULL,
-        status VARCHAR(50) DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT NOW (),
-        updated_at TIMESTAMP DEFAULT NOW (),
-    );
+
 
 CREATE TABLE team_member_permissions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

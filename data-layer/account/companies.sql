@@ -33,6 +33,18 @@ CREATE TABLE company_users (
     PRIMARY KEY (company_id, user_id)
 );
 
+CREATE TABLE
+    company_invitations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+        company_id UUID NOT NULL REFERENCES companies (id) ON DELETE CASCADE,
+        email VARCHAR(255) NOT NULL,
+        role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+        invited_by UUID REFERENCES users (id) ON DELETE SET NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW (),
+        updated_at TIMESTAMP DEFAULT NOW ()
+    );
+
 -- TODO FIX
 CREATE VIEW company_usage_limits AS
 SELECT 

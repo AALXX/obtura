@@ -22,17 +22,6 @@ export interface TeamCard {
     description: string
 }
 
-export interface InvitationData {
-    type: string
-    teamId: string
-    invitedEmail: string
-    invitedBy: string
-    role: string
-    companyName: string
-    iat: number
-    exp: number
-}
-
 export enum TeamRole {
     CEO = 'ceo',
     CTO = 'cto',

@@ -176,13 +176,12 @@ function getPasswordResetEmailTemplate(email: string, link: string) {
  * Returns an HTML template for a team invitation email.
  * @param {string} invitedEmail The email address of the user who is being invited.
  * @param {string} inviterName The name of the user who is sending the invitation.
- * @param {string} teamName The name of the team.
  * @param {string} companyName The name of the company.
  * @param {string} inviteLink The link to join the team.
  * @param {string} role The role of the user in the team. Defaults to 'Member'.
  * @return {string} The HTML template for the email.
  */
-function getTeamInvitationEmailTemplate(invitedEmail: string, inviterName: string, teamName: string, companyName: string, inviteLink: string, role: string) {
+function getCompanyInvitationEmailTemplate(invitedEmail: string, inviterName: string, companyName: string, inviteLink: string, role: string) {
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -398,16 +397,12 @@ function getTeamInvitationEmailTemplate(invitedEmail: string, inviterName: strin
     </div>
     
     <div class="content">
-      <h2>You've been invited to join a team</h2>
+      <h2>You've been invited to Obtura</h2>
       <p class="subtitle">Start shipping code without DevOps complexity</p>
       
-      <p><span class="highlight">${inviterName}</span> has invited you to join their team on Obtura.</p>
+      <p><span class="highlight">${inviterName}</span> from <span class="highlight">${companyName}</span> has invited you to join their organization on Obtura.</p>
       
       <div class="invite-card">
-        <div class="invite-row">
-          <span class="invite-label">Team</span>
-          <span class="invite-value">${teamName}</span>
-        </div>
         <div class="invite-row">
           <span class="invite-label">Company</span>
           <span class="invite-value">${companyName}</span>
@@ -464,4 +459,4 @@ function getTeamInvitationEmailTemplate(invitedEmail: string, inviterName: strin
 </html>`;
 }
 
-export { getResetEmailTemplate, getPasswordResetEmailTemplate, getTeamInvitationEmailTemplate };
+export { getResetEmailTemplate, getPasswordResetEmailTemplate, getCompanyInvitationEmailTemplate };
