@@ -44,16 +44,16 @@ const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamNam
     const filteredMembers = members.filter(member => member.name.toLowerCase().includes(searchQuery.toLowerCase()) || member.email.toLowerCase().includes(searchQuery.toLowerCase()))
 
     return (
-        <div className="min-h-screen p-8 text-white">
+        <div className="min-h-screen p-6 text-white">
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="mb-8">
-                    <Link href="/team" className="mb-6 flex cursor-pointer items-center text-gray-400 transition-colors hover:text-white">
+                <div className="mb-6">
+                    <Link href="/team" className="mb-4 flex cursor-pointer items-center text-gray-400 transition-colors hover:text-white">
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         All Teams
                     </Link>
 
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3">
                             {isEditingName ? (
                                 <input
                                     type="text"
@@ -66,26 +66,26 @@ const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamNam
                                         }
                                     }}
                                     autoFocus
-                                    className="rounded-lg border border-zinc-700 bg-[#1b1b1b] px-3 py-1 text-3xl font-bold transition-colors focus:border-orange-500 focus:outline-none"
+                                    className="rounded-lg border border-zinc-700 bg-[#1b1b1b] px-3 py-1 text-2xl font-bold transition-colors focus:border-orange-500 focus:outline-none"
                                 />
                             ) : (
-                                <h1 className="text-3xl font-bold">{teamName}</h1>
+                                <h1 className="text-2xl font-bold">{teamName}</h1>
                             )}
                             {currentUser?.can_edit && (
                                 <button onClick={() => setIsEditingName(true)} className="text-gray-400 transition-colors hover:text-white">
-                                    <Edit2 className="h-5 w-5" />
+                                    <Edit2 className="h-4 w-4" />
                                 </button>
                             )}
                         </div>
                         {currentUser?.can_edit && (
-                            <button className="flex cursor-pointer items-center gap-2 rounded-lg bg-orange-500 px-6 py-2.5 font-medium text-white transition-colors hover:bg-orange-600" onClick={() => setShowInviteMembersDialog(true)}>
+                            <button className="flex cursor-pointer items-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-orange-600" onClick={() => setShowInviteMembersDialog(true)}>
                                 <UserPlus className="h-4 w-4" />
                                 Add Member
                             </button>
                         )}
                     </div>
 
-                    <div className="mt-4 flex items-center gap-4 text-sm">
+                    <div className="mt-3 flex items-center gap-3 text-sm">
                         <div className="flex items-center text-gray-400">
                             <Users className="mr-2 h-4 w-4" />
                             {members.length} members
@@ -100,28 +100,28 @@ const TeamDetails: React.FC<{ members: TeamMemberData[]; teamId: string; teamNam
                     </DialogCanvas>
                 )}
 
-                <div className="mb-6">
+                <div className="mb-5">
                     <div className="relative">
-                        <Search className="absolute top-1/2 left-4 h-5 w-5 -translate-y-1/2 transform text-gray-500" />
-                        <input type="text" placeholder="Search members..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full rounded-lg border border-zinc-800 bg-[#1b1b1b] py-3 pr-4 pl-12 text-white placeholder-gray-500 transition-colors focus:border-zinc-700 focus:outline-none" />
+                        <Search className="absolute top-1/2 left-3.5 h-5 w-5 -translate-y-1/2 transform text-gray-500" />
+                        <input type="text" placeholder="Search members..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full rounded-lg border border-zinc-800 bg-[#1b1b1b] py-2.5 pr-3.5 pl-11 text-sm text-white placeholder-gray-500 transition-colors focus:border-zinc-700 focus:outline-none" />
                     </div>
                 </div>
 
-                <div className="mb-8 space-y-4">
+                <div className="mb-6 space-y-3">
                     {filteredMembers.map(member => (
-                        <div key={member.id} className="flex items-center rounded-lg border border-zinc-800 bg-[#1b1b1b] p-6 transition-colors">
-                            <div className="flex items-center gap-4">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-orange-500/10 text-sm font-semibold text-orange-500">{getInitials(member.name)}</div>
+                        <div key={member.id} className="flex items-center rounded-lg border border-zinc-800 bg-[#1b1b1b] p-5 transition-colors">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10 text-sm font-semibold text-orange-500">{getInitials(member.name)}</div>
                                 <div>
                                     <div className="flex items-center gap-2">
-                                        <h3 className="font-medium text-white">{member.name}</h3>
+                                        <h3 className="text-base font-medium text-white">{member.name}</h3>
                                         {member.is_you && <span className="text-sm text-gray-500">(you)</span>}
                                     </div>
                                     <p className="text-sm text-gray-400">{member.email}</p>
                                 </div>
                             </div>
                             <div className="ml-auto flex items-center gap-2">
-                                {member.can_edit ? <span className="rounded-lg bg-orange-500 px-4 py-1.5 text-sm font-medium text-white">{member.rolename}</span> : <span className="rounded-lg bg-zinc-800 px-4 py-1.5 text-sm text-gray-400">{member.rolename}</span>}
+                                {member.can_edit ? <span className="rounded-lg bg-orange-500 px-3 py-1.5 text-sm font-medium text-white">{member.rolename}</span> : <span className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-gray-400">{member.rolename}</span>}
                                 {!member.is_you && currentUser?.can_edit && <MemberActionMenu member={member} onRemove={handleRemoveMember} />}
                             </div>
                         </div>

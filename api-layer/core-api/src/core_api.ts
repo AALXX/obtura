@@ -5,6 +5,7 @@ import cors from 'cors';
 import UserAccountManager from './routes/UserAccountManagerRoutes';
 import TeamManager from './routes/TeamManagerRoutes';
 import CompanyManager from './routes/CompanyManagerRoutes';
+import ProjectManager from './routes/ProjectsManagerRoutes';
 import config from './config/config';
 import logging from './config/logging';
 
@@ -34,6 +35,7 @@ app.get('/health', (req, res) => {
 app.use('/account-manager', UserAccountManager);
 app.use('/teams-manager', TeamManager);
 app.use('/company-manager', CompanyManager);
+app.use('/projects-manager', ProjectManager);
 
 app.use((req, res, next: NextFunction) => {
     const error = new Error('Not Found');

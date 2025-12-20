@@ -166,7 +166,7 @@ const InviteEmployeeDialog: React.FC<{ accessToken: string }> = ({ accessToken }
                     <UserPlus className="h-6 w-6" />
                     Invite  Members
                 </div>
-                <p className="text-gray-300">Send invitations to join your team</p>
+                <p className="text-gray-300">Send invitations to join your company</p>
             </div>
 
             <div className="my-4 h-px w-full border-b border-neutral-800" />

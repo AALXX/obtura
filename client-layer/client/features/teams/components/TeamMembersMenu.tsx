@@ -31,17 +31,17 @@ const MemberActionMenu: React.FC<MemberActionMenuProps> = ({ member, onRemove })
     return (
         <div className="relative" ref={menuRef}>
             <button onClick={() => setIsOpen(!isOpen)} className="cursor-pointer rounded p-1 text-gray-400 transition-colors hover:bg-zinc-800 hover:text-white">
-                <MoreVertical className="h-5 w-5" />
+                <MoreVertical className="h-4 w-4" />
             </button>
 
             {isOpen && (
-                <div className="absolute top-full right-0 z-10 mt-2 w-48 rounded-lg border border-zinc-800 bg-[#1b1b1b] py-2 shadow-xl">
+                <div className="absolute top-full right-0 z-10 mt-1.5 w-44 rounded-lg border border-zinc-800 bg-[#1b1b1b] py-1.5 shadow-xl">
                     <button
                         onClick={() => {
                             onRemove(member.id)
                             setIsOpen(false)
                         }}
-                        className="flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm text-red-500 transition-colors hover:bg-zinc-800"
+                        className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-sm text-red-500 transition-colors hover:bg-zinc-800"
                     >
                         <Trash2 className="h-4 w-4" />
                         Remove Member

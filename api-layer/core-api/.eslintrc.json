@@ -13,7 +13,7 @@
     "rules": {
         // Indent with 4 spaces
         "indent": ["error", 4],
-        "max-len": ["error", { "code": 220 }],
+        "max-len": ["error", { "code": 300 }],
         "object-curly-spacing": ["error", "always"],
         "new-cap": 0
     }
