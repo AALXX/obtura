@@ -3,6 +3,7 @@ import logging from '../config/logging';
 import { CustomRequestValidationResult } from '../common/comon';
 import db from '../config/postgresql';
 import { getUserIdFromSessionToken, getDataRegion } from '../lib/utils';
+import rabbitmq from '../config/rabbitmql';
 
 /**
  * Registers a new user account with Google authentication
@@ -192,8 +193,61 @@ const GetProjects = async (req: Request, res: Response) => {
     }
 };
 
+const TriggerBuild = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        errors.array().map((error) => {
+            logging.error('TRIGGER-BUILD', error.errorMsg);
+        });
+
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    try {
+        const { accessToken } = req.body;
+
+        const userID = await getUserIdFromSessionToken(accessToken);
+
+        if (!userID) {
+            return res.status(401).json({
+                error: true,
+                errmsg: 'Invalid or expired access token',
+            });
+        }
+
+        const result = await db.query('INSERT INTO builds (project_id, initiated_by_user_id, commit_hash, branch, status) VALUES ($1, $2, $3, $4, $5) RETURNING id', [req.body.projectId, userID, req.body.commitHash, req.body.branch, 'PENDING']);
+
+        const buildId = result.rows[0].id;
+
+        await rabbitmq.connect();
+
+        const channel = await rabbitmq.getChannel();
+
+        await channel.publish(
+            'obtura.builds',
+            'build.triggered',
+            Buffer.from(
+                JSON.stringify({
+                    accessToken: accessToken,
+                    buildId: buildId,
+                    projectId: req.body.projectId,
+                    commitHash: req.body.commitHash,
+                    branch: req.body.branch,
+                }),
+            ),
+            { persistent: true, timestamp: Date.now() },
+        );
+
+        return res.status(200).json({});
+    } catch (error) {
+        console.error('trigger build error:', error);
+        res.status(500).json({ error: 'Failed to trigger build' });
+    }
+};
+
 export default {
     RegisterUserWithGoogle,
     GetProjects,
+    TriggerBuild,
     CreateProject,
 };

@@ -23,6 +23,20 @@ CREATE TABLE
         UNIQUE (team_id, slug)
     );
 
+CREATE TABLE builds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
+    project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    initiated_by_user_id UUID REFERENCES users (id),
+    -- Git info
+    commit_hash VARCHAR(40) NOT NULL,
+    branch VARCHAR(255),
+    -- Status
+    status VARCHAR(50) DEFAULT 'queued',
+    -- Timestamps
+    created_at TIMESTAMP DEFAULT NOW (),
+    completed_at TIMESTAMP
+)
+
 CREATE TABLE
     deployments (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid (),

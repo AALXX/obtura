@@ -35,4 +35,6 @@ router.put('/update-project', body('accessToken').not().isEmpty(), body('project
 
 router.delete('/delete-project', body('accessToken').not().isEmpty(), body('projectId').not().isEmpty(), ProjectsServices.RegisterUserWithGoogle);
 
+router.post('/trigger-build', body('projectId').not().isEmpty(), ProjectsServices.TriggerBuild);
+
 export = router;
