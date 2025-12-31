@@ -98,7 +98,7 @@ services:
     container_name: obtura-core-api
     labels:
       - traefik.enable=true
-      - traefik.http.routers.core-api.rule=PathPrefix(\`/backend\`)
+      - traefik.http.routers.core-api.rule=PathPrefix(`/backend`)
       - traefik.http.routers.core-api.entrypoints=web
       - traefik.http.routers.core-api.priority=20
       - traefik.http.middlewares.strip-backend.stripprefix.prefixes=/backend
