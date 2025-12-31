@@ -307,11 +307,18 @@ func (w *Worker) handleBuildJob(msg amqp.Delivery) {
 		w.streamLog(job.BuildID, "⚠️ No environment configurations uploaded - using defaults")
 	}
 
+
 	for _, framework := range result.Frameworks {
 		serviceDir := filepath.Join(workDir, framework.Path)
 		dockerfilePath := filepath.Join(serviceDir, "Dockerfile")
 
 		if !pkg.FileExists(dockerfilePath) {
+			w.streamLog(job.BuildID, fmt.Sprintf("Generating Dockerfile for %s...", framework.Name))
+
+			if framework.Name == "Next.js" {
+				w.streamLog(job.BuildID, "Checking Next.js configuration for standalone output...")
+			}
+
 			dockerfile, err := builder.GenerateDockerfile(framework, serviceDir)
 			if err != nil {
 				log.Printf("❌ Failed to generate Dockerfile for %s: %v", framework.Name, err)
@@ -327,7 +334,19 @@ func (w *Worker) handleBuildJob(msg amqp.Delivery) {
 				return
 			}
 
-			w.streamLog(job.BuildID, fmt.Sprintf("Generated Dockerfile for %s in %s/", framework.Name, framework.Path))
+			w.streamLog(job.BuildID, fmt.Sprintf("✅ Generated Dockerfile for %s in %s/", framework.Name, framework.Path))
+
+			// Additional verification for Next.js
+			if framework.Name == "Next.js" {
+				configFiles := []string{"next.config.js", "next.config.mjs", "next.config.ts"}
+				for _, cf := range configFiles {
+					cfPath := filepath.Join(serviceDir, cf)
+					if pkg.FileExists(cfPath) {
+						w.streamLog(job.BuildID, fmt.Sprintf("Using Next.js config: %s", cf))
+						break
+					}
+				}
+			}
 		} else {
 			w.streamLog(job.BuildID, fmt.Sprintf("Using existing Dockerfile for %s in %s/", framework.Name, framework.Path))
 		}

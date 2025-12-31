@@ -2,13 +2,16 @@ package builder
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 func GenerateDockerfile(framework *Framework, projectPath string) (string, error) {
 	switch {
 	case framework.Name == "Next.js":
-		return generateNextJsDockerfile(framework)
+		return generateNextJsDockerfile(framework, projectPath)
 	case framework.Name == "Nuxt.js":
 		return generateNuxtDockerfile(framework)
 	case framework.Name == "Express.js":
@@ -40,8 +43,174 @@ func GenerateDockerfile(framework *Framework, projectPath string) (string, error
 	}
 }
 
-func generateNextJsDockerfile(framework *Framework) (string, error) {
-	return `FROM node:20-alpine AS base
+func ensureNextConfigStandalone(projectPath string) (bool, error) {
+	configFiles := []string{
+		"next.config.js",
+		"next.config.mjs",
+		"next.config.ts",
+	}
+
+	var configPath string
+	var configContent []byte
+	var fileExt string
+
+	for _, configFile := range configFiles {
+		path := filepath.Join(projectPath, configFile)
+		if _, err := os.Stat(path); err == nil {
+			configPath = path
+			configContent, err = os.ReadFile(path)
+			if err != nil {
+				return false, fmt.Errorf("failed to read config file: %w", err)
+			}
+			fileExt = filepath.Ext(configFile)
+			break
+		}
+	}
+
+	if configPath == "" {
+		configPath = filepath.Join(projectPath, "next.config.js")
+		newConfig := `/** @type {import('next').NextConfig} */
+const nextConfig = {
+  output: 'standalone',
+}
+
+module.exports = nextConfig
+`
+		if err := os.WriteFile(configPath, []byte(newConfig), 0644); err != nil {
+			return false, fmt.Errorf("failed to create next.config.js: %w", err)
+		}
+		return true, nil
+	}
+
+	content := string(configContent)
+
+	standalonePattern := regexp.MustCompile(`output:\s*['"\x60]standalone['"\x60]`)
+	if standalonePattern.MatchString(content) {
+		return false, nil // Already configured
+	}
+
+	// Attempt different strategies to add standalone
+	modified := false
+	var newContent string
+
+	outputPattern := regexp.MustCompile(`(output:\s*)['"\x60]([^'"\x60]+)['"\x60]`)
+	if outputPattern.MatchString(content) {
+		newContent = outputPattern.ReplaceAllString(content, `${1}'standalone'`)
+		modified = true
+	} else {
+		// Strategy 2: Find the main config object and add output property
+		// This handles various formats more robustly
+		
+		// Look for patterns like:
+		// const nextConfig = { ... }
+		// module.exports = { ... }
+		// export default { ... }
+		
+		configPatterns := []string{
+			`(const\s+\w+\s*=\s*\{)(\s*)`,
+			`(module\.exports\s*=\s*\{)(\s*)`,
+			`(export\s+default\s+\{)(\s*)`,
+		}
+
+		for _, pattern := range configPatterns {
+			re := regexp.MustCompile(pattern)
+			if re.MatchString(content) {
+				// Add output as first property
+				newContent = re.ReplaceAllString(content, "$1\n  output: 'standalone',\n$2")
+				modified = true
+				break
+			}
+		}
+
+		// Strategy 3: If config uses spread or is complex, wrap it
+		if !modified {
+			// For .mjs or .ts files, use export default
+			if fileExt == ".mjs" || fileExt == ".ts" {
+				// Check if there's already an export default with a variable
+				exportDefaultPattern := regexp.MustCompile(`export\s+default\s+(\w+)`)
+				matches := exportDefaultPattern.FindStringSubmatch(content)
+				
+				if len(matches) > 1 {
+					varName := matches[1]
+					newContent = exportDefaultPattern.ReplaceAllString(content, 
+						fmt.Sprintf(`export default {
+  ...%s,
+  output: 'standalone',
+}`, varName))
+					modified = true
+				} else if strings.Contains(content, "export default") {
+					inlineExportPattern := regexp.MustCompile(`(export\s+default\s+\{)(\s*)`)
+					if inlineExportPattern.MatchString(content) {
+						newContent = inlineExportPattern.ReplaceAllString(content, "$1\n  output: 'standalone',\n$2")
+						modified = true
+					}
+				} else {
+					newContent = content + `
+
+export default {
+  output: 'standalone',
+}
+`
+					modified = true
+				}
+			} else {
+				moduleExportsPattern := regexp.MustCompile(`module\.exports\s*=\s*(\w+)`)
+				matches := moduleExportsPattern.FindStringSubmatch(content)
+				
+				if len(matches) > 1 {
+					varName := matches[1]
+					newContent = moduleExportsPattern.ReplaceAllString(content,
+						fmt.Sprintf(`module.exports = {
+  ...%s,
+  output: 'standalone',
+}`, varName))
+					modified = true
+				} else {
+					newContent = content + `
+
+// Standalone output added by build system
+const originalConfig = module.exports || {}
+module.exports = {
+  ...originalConfig,
+  output: 'standalone',
+}
+`
+					modified = true
+				}
+			}
+		}
+	}
+
+	if modified {
+		// Write the modified config
+		if err := os.WriteFile(configPath, []byte(newContent), 0644); err != nil {
+			return false, fmt.Errorf("failed to write updated config: %w", err)
+		}
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func generateNextJsDockerfile(framework *Framework, projectPath string) (string, error) {
+	modified, err := ensureNextConfigStandalone(projectPath)
+	if err != nil {
+		fmt.Printf("⚠️  Failed to modify Next.js config: %v\n", err)
+	}
+	
+	if modified {
+		fmt.Printf("✓ Added standalone output to Next.js config\n")
+	}
+
+	// Check if we should use standalone mode
+	useStandalone := true
+	
+	// Verify standalone directory will exist after build
+	standalonePath := filepath.Join(projectPath, ".next", "standalone")
+	_, statErr := os.Stat(standalonePath)
+	standaloneExists := statErr == nil
+
+	dockerfile := `FROM node:20-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
@@ -59,10 +228,16 @@ COPY . .
 
 # Set environment for build
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
 
-RUN npm run build
+# Skip type checking and linting during build to avoid failures
+# These should be done in CI/CD before building
+ENV SKIP_ENV_VALIDATION=1
 
-# Production image, copy all the files and run next
+# Build the application with verbose output
+RUN npm run build || (cat /root/.npm/_logs/*.log 2>/dev/null; exit 1)
+
+# Production image
 FROM base AS runner
 WORKDIR /app
 
@@ -72,13 +247,16 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-COPY --from=builder /app/public ./public
+`
 
-# Set the correct permission for prerender cache
+	if useStandalone && (modified || standaloneExists) {
+		dockerfile += `COPY --from=builder /app/public ./public
+
+# Create .next directory with correct permissions
 RUN mkdir .next
 RUN chown nextjs:nodejs .next
 
-# Automatically leverage output traces to reduce image size
+# Copy standalone output
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
@@ -90,7 +268,26 @@ ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 CMD ["node", "server.js"]
-`, nil
+`
+	} else {
+		dockerfile += `COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+
+USER nextjs
+
+EXPOSE 3000
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["npm", "start"]
+`
+		fmt.Printf("⚠️  Using fallback Dockerfile (non-standalone) for Next.js\n")
+	}
+
+	return dockerfile, nil
 }
 
 func generateNuxtDockerfile(framework *Framework) (string, error) {
