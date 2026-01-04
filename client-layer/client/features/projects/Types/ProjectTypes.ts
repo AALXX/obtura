@@ -16,6 +16,7 @@ export interface ProjectData {
     staging: EnvironmentDeployment
     preview: PreviewDeployment[]
     metrics: ProjectMetrics
+    gitRepoUrl: string
 }
 
 export interface FrameworkConfig {

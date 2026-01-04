@@ -1,13 +1,14 @@
 'use client'
 import React, { useState } from 'react'
-import { Rocket, Settings, Activity, Database, Globe, GitBranch, Clock, CheckCircle2, XCircle, AlertCircle, Eye, Code, Server, Lock, RotateCcw, Play, Pause, Plus, Trash2, Copy, ExternalLink, TrendingUp, Zap, Shield, Layers, Package, Hammer, Upload } from 'lucide-react'
+import { Rocket, Settings, Activity, Database, Globe, GitBranch, Clock, CheckCircle2, XCircle, AlertCircle, Eye, Code, Server, Lock, RotateCcw, Play, Pause, Plus, Trash2, Copy, ExternalLink, TrendingUp, Zap, Shield, Layers, Package, Hammer, Upload, Calendar } from 'lucide-react'
 import { ProjectData } from './Types/ProjectTypes'
 import EnvFileUpload from '../account/components/EnvFileUpload'
 import DialogCanvas from '@/common-components/DialogCanvas'
 import axios from 'axios'
+import BuildDialog from './components/buildDialog'
 
-const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }> = ({ projectData, accessToken }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'environment' | 'settings' | 'monitoring'>('overview')
+const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }> = ({ projectData, accessToken }) => {
+    const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'environment' | 'settings' | 'monitoring' | 'builds'>('overview')
     const [envVars, setEnvVars] = useState([
         { key: 'DATABASE_URL', value: '••••••••••••', isSecret: false },
         { key: 'API_KEY', value: '••••••••••••', isSecret: true },
@@ -17,7 +18,7 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
     const [newEnvKey, setNewEnvKey] = useState('')
     const [newEnvValue, setNewEnvValue] = useState('')
     const [isDeploying, setIsDeploying] = useState(false)
-    const [isBuilding, setIsBuilding] = useState(false)
+    const [openBuildDialog, setOpenBuildDialog] = useState(false)
     const [showEnvFileDialog, setShowEnvFileDialog] = useState(false)
 
     const handleDeploy = (environment: string) => {
@@ -25,12 +26,6 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
         setTimeout(() => {
             setIsDeploying(false)
             alert(`Deployment to ${environment} initiated!`)
-        }, 2000)
-    }
-    const handleBuild = () => {
-        setIsBuilding(true)
-        setTimeout(() => {
-            setIsBuilding(false)
         }, 2000)
     }
 
@@ -66,7 +61,8 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
         { id: 'deployments', label: 'Deployments', icon: Rocket },
         { id: 'environment', label: 'Environment', icon: Lock },
         { id: 'settings', label: 'Settings', icon: Settings },
-        { id: 'monitoring', label: 'Monitoring', icon: TrendingUp }
+        { id: 'monitoring', label: 'Monitoring', icon: TrendingUp },
+        { id: 'builds', label: 'Builds', icon: Hammer }
     ]
 
     const hasDeployments = projectData.production.url || projectData.staging.url || projectData.preview.length > 0
@@ -108,18 +104,16 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                         </div>
 
                         <div className="flex items-center gap-3">
-                            <button onClick={() => handleBuild()} disabled={isBuilding} className="flex items-center gap-2 rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50">
-                                {isBuilding ? (
-                                    <>
-                                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                                        Building...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Hammer size={18} />
-                                        Build
-                                    </>
-                                )}
+                            <button
+                                onClick={() => {
+                                    setOpenBuildDialog(true)
+                                }}
+                                className="flex items-center gap-2 rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50"
+                            >
+                                <>
+                                    <Hammer size={18} />
+                                    Build
+                                </>
                             </button>
 
                             <button onClick={() => handleDeploy('production')} disabled={isDeploying} className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-orange-600 disabled:opacity-50">
@@ -139,8 +133,17 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                     </div>
                 </div>
             </div>
-
-            {/* Navigation Tabs */}
+            {openBuildDialog && (
+                <DialogCanvas closeDialog={() => setOpenBuildDialog(false)}>
+                    <BuildDialog
+                        accessToken={accessToken}
+                        projectId={projectData.id}
+                        gitRepoUrl={projectData.gitRepoUrl} // Add this line
+                        onBuildComplete={() => setOpenBuildDialog(false)}
+                        onClose={() => setOpenBuildDialog(false)}
+                    />
+                </DialogCanvas>
+            )}
             <div className="border-b border-zinc-800">
                 <div className="container mx-auto px-6">
                     <div className="flex gap-1">
@@ -157,11 +160,9 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                 </div>
             </div>
 
-            {/* Content */}
             <div className="container mx-auto px-6 py-8">
                 {activeTab === 'overview' && (
                     <div className="space-y-6">
-                        {/* Monorepo Frameworks Section */}
                         {projectData.isMonorepo && projectData.frameworks && projectData.frameworks.length > 0 && (
                             <div className="space-y-4">
                                 <div className="flex items-center gap-2">
@@ -206,7 +207,6 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                             </div>
                         )}
 
-                        {/* Status Cards */}
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
                             <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-4">
                                 <div className="mb-1 flex items-center gap-2 text-sm text-zinc-400">
@@ -241,7 +241,6 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                             </div>
                         </div>
 
-                        {/* Environment Status */}
                         <div className="space-y-4">
                             <h2 className="text-xl font-semibold">Environments</h2>
 
@@ -259,7 +258,6 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                                 </div>
                             ) : (
                                 <>
-                                    {/* Production */}
                                     {projectData.production.url && (
                                         <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-5">
                                             <div className="mb-4 flex items-center justify-between">
@@ -313,7 +311,6 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                                         </div>
                                     )}
 
-                                    {/* Staging */}
                                     {projectData.staging.url && (
                                         <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-5">
                                             <div className="mb-4 flex items-center justify-between">
@@ -363,7 +360,6 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                                         </div>
                                     )}
 
-                                    {/* Preview Environments */}
                                     {projectData.preview.length > 0 && (
                                         <div>
                                             <h3 className="mb-3 text-lg font-semibold">Preview Deployments</h3>
@@ -633,6 +629,45 @@ const ProjectDetails: React.FC<{ projectData: ProjectData, accessToken: string }
                                 <h3 className="mb-2 font-semibold text-red-500">Danger Zone</h3>
                                 <p className="mb-4 text-sm text-zinc-400">Irreversible actions for this project</p>
                                 <button className="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600">Delete Project</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'builds' && (
+                    <div className="space-y-6">
+                        <div>
+                            <h2 className="text-xl font-semibold">Project Builds</h2>
+                            <p className="text-sm text-zinc-400">View your project builds</p>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-5">
+                                <h3 className="mb-4 font-semibold">Builds</h3>
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/50 p-4">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <Code size={16} />
+                                                <span>Build 1</span>
+                                            </div>
+                                            <div className="mt-2 flex items-center gap-2 text-sm text-zinc-400">
+                                                <Calendar size={16} />
+                                                <span>2023-01-01</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="flex items-center gap-1">
+                                                <div className="h-2 w-2 rounded-full bg-green-500" />
+                                                <span>Success</span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <div className="h-2 w-2 rounded-full bg-red-500" />
+                                                <span>Failure</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

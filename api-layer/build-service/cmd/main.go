@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"build-service/internal/logger"
 	"build-service/internal/security"
 	"build-service/internal/storage"
 	"build-service/internal/worker"
@@ -42,7 +43,6 @@ func main() {
 	defer rateLimiter.Close()
 	log.Println("✅ Successfully connected to Redis")
 
-	// Initialize MinIO storage
 	minioEndpoint := pkg.GetEnv("MINIO_ENDPOINT", "localhost:9000")
 	minioAccessKey := pkg.GetEnv("MINIO_ACCESS_KEY", "minioadmin")
 	minioSecretKey := pkg.GetEnv("MINIO_SECRET_KEY", "minioadmin")
@@ -59,6 +59,20 @@ func main() {
 
 	r := gin.Default()
 
+	// CORS middleware for SSE
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
+
 	r.GET("/health", func(c *gin.Context) {
 		if err := db.Ping(); err != nil {
 			c.JSON(503, gin.H{
@@ -73,6 +87,36 @@ func main() {
 			"status":   "healthy",
 			"database": "connected",
 		})
+	})
+
+	r.GET("/api/builds/:buildId/logs/stream", logger.HandleBuildLogsSSE)
+
+	r.GET("/api/builds/:buildId/logs", func(c *gin.Context) {
+		buildID := c.Param("buildId")
+
+		rows, err := db.Query(
+			"SELECT log_type, message, created_at FROM build_logs WHERE build_id = $1 ORDER BY created_at ASC",
+			buildID,
+		)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Failed to fetch logs"})
+			return
+		}
+		defer rows.Close()
+
+		var logs []gin.H
+		for rows.Next() {
+			var logType, message string
+			var createdAt interface{}
+			rows.Scan(&logType, &message, &createdAt)
+			logs = append(logs, gin.H{
+				"type":      logType,
+				"message":   message,
+				"timestamp": createdAt,
+			})
+		}
+
+		c.JSON(200, gin.H{"logs": logs})
 	})
 
 	w, err := worker.NewWorker(rabbitMQURL, db, rateLimiter, minioStorage)
@@ -102,6 +146,7 @@ func main() {
 	}()
 
 	log.Printf("🌐 Starting server on port %s...", serverPort)
+	log.Printf("📡 SSE endpoint available at: http://localhost:%s/api/builds/{buildId}/logs/stream", serverPort)
 	if err := r.Run(":" + serverPort); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"build-service/internal/builder"
 	"build-service/internal/git"
+	"build-service/internal/logger"
 	"build-service/internal/security"
 	"build-service/internal/storage"
 	"build-service/pkg"
@@ -654,8 +655,22 @@ func (w *Worker) uploadBuildArtifacts(ctx context.Context, workDir, minioPrefix 
 func (w *Worker) streamLog(buildID, message string) {
 	log.Printf("[Build %s] %s", buildID, message)
 
-	// TODO: Implement actual log streaming to database or message queue
-	// For example:
-	// w.db.InsertBuildLog(context.Background(), buildID, message, time.Now())
-	// or publish to a logs exchange in RabbitMQ
+	logType := "info"
+	if strings.Contains(message, "✅") || strings.Contains(message, "successfully") || strings.Contains(message, "completed") {
+		logType = "success"
+	} else if strings.Contains(message, "❌") || strings.Contains(message, "Failed") || strings.Contains(message, "failed") || strings.Contains(message, "error") {
+		logType = "error"
+	} else if strings.Contains(message, "⚠️") || strings.Contains(message, "warning") {
+		logType = "warn"
+	}
+
+	if logBroker := logger.GetLogBroker(); logBroker != nil {
+		logBroker.PublishLog(buildID, logType, message)
+	}
+
+	ctx := context.Background()
+	w.db.ExecContext(ctx,
+		"INSERT INTO build_logs (build_id, log_type, message, created_at) VALUES ($1, $2, $3, NOW())",
+		buildID, logType, message,
+	)
 }

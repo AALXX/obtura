@@ -1,25 +1,30 @@
-CREATE TABLE
-    projects (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid (),
-        company_id UUID NOT NULL REFERENCES companies (id) ON DELETE CASCADE,
-        name VARCHAR(255) NOT NULL,
-        slug VARCHAR(100) NOT NULL,
-        team_id UUID REFERENCES teams (id) ON DELETE CASCADE,
-        -- Git info
-        git_repo_url TEXT NOT NULL,
-        git_branches JSONB,
-        -- Config
-        runtime VARCHAR(50), -- 'nodejs', 'python', 'php'
-        frameworkData JSONB,
-        -- Environment variables (encrypt in app layer)
-        env_variables JSONB,
-        -- GDPR Essential
-        data_region data_region DEFAULT 'eu-central',
-        created_at TIMESTAMP DEFAULT NOW (),
-        updated_at TIMESTAMP DEFAULT NOW (),
-        deleted_at TIMESTAMP,
-        UNIQUE (team_id, slug)
-    );
+CREATE TABLE projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(100) NOT NULL,
+    team_id UUID REFERENCES teams(id) ON DELETE CASCADE,
+    
+    github_installation_id BIGINT REFERENCES github_installations(installation_id) ON DELETE SET NULL,
+    github_repository_id VARCHAR(50),
+    github_repository_full_name VARCHAR(255), 
+    
+    git_repo_url TEXT NOT NULL,
+    git_branches JSONB, 
+    
+    framework_data JSONB,
+    
+    data_region data_region DEFAULT 'eu-central',
+    
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    deleted_at TIMESTAMP,
+    
+    UNIQUE (team_id, slug)
+);
+
+CREATE INDEX idx_projects_github_installation ON projects(github_installation_id);
+CREATE INDEX idx_projects_github_repository ON projects(github_repository_id);
 
 create table
     project_env_configs (
@@ -51,6 +56,34 @@ CREATE TABLE
         created_at TIMESTAMP DEFAULT NOW (),
         completed_at TIMESTAMP
     )
+CREATE TABLE
+    IF NOT EXISTS build_logs (
+        id SERIAL PRIMARY KEY,
+        build_id UUID NOT NULL REFERENCES builds (id) ON DELETE CASCADE,
+        log_type VARCHAR(50) NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW ()
+    );
+
+CREATE INDEX idx_build_logs_build_id ON build_logs (build_id);
+
+CREATE INDEX idx_build_logs_created_at ON build_logs (created_at);
+
+CREATE TABLE IF NOT EXISTS github_installations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    installation_id BIGINT UNIQUE NOT NULL,
+    company_id UUID REFERENCES companies (id) ON DELETE CASCADE,
+    account_login VARCHAR(255) NOT NULL,
+    account_type VARCHAR(50) NOT NULL, -- 'User' or 'Organization'
+    account_id BIGINT NOT NULL,
+    repositories JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_projects_github_installation ON projects(github_installation_id)
+
+
 CREATE TABLE
     deployments (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid (),

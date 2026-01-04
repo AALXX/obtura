@@ -6,3 +6,6 @@
 /api-layer/core-api/.env
 docker-compose.dev.yml
 .idea
+
+/secrets
+/cloudflared

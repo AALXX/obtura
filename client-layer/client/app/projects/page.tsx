@@ -3,7 +3,7 @@ import AuthRequired from '@/common-components/AuthRequredForm'
 import UserProjects from '@/features/projects/UserProjects'
 import CompanyRequired from '@/common-components/CompayRequired'
 import { apiClient } from '@/lib/utils'
-import { ProjectData } from '@/features/projects/Types/ProjectTypes'
+import { ProjectResponse } from '@/features/projects/Types/ProjectTypes'
 import { getErrorComponent } from '@/lib/errorHandlers'
 
 const Projects = async () => {
@@ -19,14 +19,14 @@ const Projects = async () => {
             return <CompanyRequired featureAccess="projects" />
         }
 
-        const projectData = await apiClient.get<{ projects: ProjectData[] }>(`${process.env.BACKEND_URL}/projects-manager/get-projects/${session.backendToken}`)
+        const projectData = await apiClient.get<{ projects: ProjectResponse[] }>(`${process.env.BACKEND_URL}/projects-manager/get-projects/${session.backendToken}`)
 
         const errorComponent = getErrorComponent(projectData.status, 'projects')
         if (errorComponent) return errorComponent
 
         return (
             <div>
-                <UserProjects accessToken={session.backendToken!} projects={projectData.data.projects} />
+                <UserProjects accessToken={session.backendToken!} projects={projectData.data.projects}  />
             </div>
         )
     } catch (error) {

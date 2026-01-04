@@ -24,6 +24,19 @@ export const getUserIdFromSessionToken = async (sessionToken: string): Promise<s
     }
 };
 
+export const getCompanyIdFromSessionToken = async (sessionToken: string): Promise<string | null> => {
+    try {
+        const session = await db.query('SELECT company_id FROM company_users WHERE user_id = (SELECT user_id FROM sessions WHERE access_token = $1)', [sessionToken]);
+        if (session.rows.length === 0) {
+            return null;
+        }
+
+        return session.rows[0].company_id;
+    } catch (error) {
+        return null;
+    }
+};
+
 export const hashPassword = async (password: string): Promise<string> => {
     const saltRounds = 10;
     const salt = await bcrypt.genSalt(saltRounds);
@@ -68,7 +81,6 @@ const mapCountryToRegion = (countryCode: string): string => {
 
     return 'eu-central';
 };
-
 
 export const normalizeServiceName = (path: string): string => {
     if (path === '.' || path === '') {

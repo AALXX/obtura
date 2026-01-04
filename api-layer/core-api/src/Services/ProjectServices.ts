@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import logging from '../config/logging';
 import { CustomRequestValidationResult } from '../common/comon';
 import db from '../config/postgresql';
-import { getUserIdFromSessionToken, getDataRegion, normalizeServiceName } from '../lib/utils';
+import { getUserIdFromSessionToken, getDataRegion, normalizeServiceName, getCompanyIdFromSessionToken } from '../lib/utils';
 import rabbitmq from '../config/rabbitmql';
 import crypto from 'crypto';
 
@@ -41,7 +41,7 @@ const CreateProject = async (req: Request, res: Response) => {
     }
 
     try {
-        const { accessToken, name, gitRepoUrl, productionBranch, stagingBranch, developmentBranch, autoDeployProduction, autoDeployStaging, autoDeployDevelopment, teamId } = req.body;
+        const { accessToken, name, gitRepoUrl, productionBranch, stagingBranch, developmentBranch, autoDeployProduction, autoDeployStaging, autoDeployDevelopment, teamId, githubInstallationId, githubRepositoryId, githubRepositoryFullName } = req.body;
 
         const userId = await getUserIdFromSessionToken(accessToken);
 
@@ -50,6 +50,29 @@ const CreateProject = async (req: Request, res: Response) => {
                 error: true,
                 errmsg: 'Invalid or expired access token',
             });
+        }
+
+        const companyId = await getCompanyIdFromSessionToken(accessToken);
+        if (!companyId) {
+            return res.status(401).json({
+                error: true,
+                errmsg: 'Invalid or expired access token',
+            });
+        }
+
+        if (githubInstallationId) {
+            const installationCheck = await db.query(
+                `SELECT 1 FROM github_installations 
+                 WHERE installation_id = $1 AND company_id = $2`,
+                [githubInstallationId, companyId],
+            );
+
+            if (installationCheck.rows.length === 0) {
+                return res.status(403).json({
+                    error: true,
+                    errmsg: 'GitHub installation not found or does not belong to user',
+                });
+            }
         }
 
         const dataRegion = getDataRegion(req);
@@ -75,16 +98,22 @@ const CreateProject = async (req: Request, res: Response) => {
                     team_id,
                     git_repo_url,
                     git_branches,
+                    github_installation_id,
+                    github_repository_id,
+                    github_repository_full_name,
                     data_region
                 )
                 SELECT
                     cu.company_id,
-                    $2,
-                    $3,
-                    $4,
-                    $5,
-                    $6,
-                    $7
+                    $2,  -- name
+                    $3,  -- slug
+                    $4,  -- team_id
+                    $5,  -- git_repo_url
+                    $6,  -- git_branches
+                    $7,  -- github_installation_id
+                    $8,  -- github_repository_id
+                    $9,  -- github_repository_full_name
+                    $10  -- data_region
                 FROM company_users cu
                 WHERE cu.user_id = $1
                 LIMIT 1
@@ -95,6 +124,9 @@ const CreateProject = async (req: Request, res: Response) => {
                 p.name AS project_name,
                 p.created_at,
                 p.slug,
+                p.github_installation_id,
+                p.github_repository_full_name,
+                p.git_branches,
                 t.name AS team_name,
                 COUNT(tm.id) AS member_count
             FROM inserted_project p
@@ -105,24 +137,53 @@ const CreateProject = async (req: Request, res: Response) => {
                 p.name,
                 p.created_at,
                 p.slug,
+                p.github_installation_id,
+                p.github_repository_full_name,
+                p.git_branches,
                 t.name
             `,
-            [userId, name, projectSlug, teamId, gitRepoUrl, JSON.stringify(branches), dataRegion],
+            [userId, name, projectSlug, teamId, gitRepoUrl, JSON.stringify(branches), githubInstallationId || null, githubRepositoryId || null, githubRepositoryFullName || null, dataRegion],
         );
 
-        const projects = result.rows.map((project) => ({
+        if (result.rows.length === 0) {
+            return res.status(400).json({
+                error: true,
+                errmsg: 'Failed to create project. User may not belong to a company.',
+            });
+        }
+
+        const project = result.rows[0];
+
+        const response = {
             id: project.id,
             projectName: project.project_name,
             createdAt: project.created_at,
             slug: project.slug,
             teamName: project.team_name,
             memberCount: Number(project.member_count),
-        }));
+            hasGitHubIntegration: !!project.github_installation_id,
+            githubRepository: project.github_repository_full_name,
+            branches: project.git_branches,
+        };
 
-        return res.status(200).json({ project: projects[0] });
-    } catch (error) {
+        logging.info('CREATE-PROJECT', `Project "${name}" created successfully by user ${userId}`);
+
+        return res.status(200).json({ project: response });
+    } catch (error: any) {
         console.error('create project error:', error);
-        return res.status(500).json({ error: 'Failed to create project' });
+        logging.error('CREATE-PROJECT', error.message);
+
+        if (error.code === '23505') {
+            return res.status(409).json({
+                error: true,
+                errmsg: 'A project with this name already exists in the team',
+            });
+        }
+
+        return res.status(500).json({
+            error: true,
+            errmsg: 'Failed to create project',
+        });
     }
 };
 
@@ -438,6 +499,7 @@ const GetProjectDetails = async (req: Request, res: Response) => {
                 p.id,
                 p.name,
                 p.slug,
+                p.git_repo_url,
                 t.name as team_name,
                 -- Get all frameworks if monorepo
                 CASE 
@@ -564,6 +626,7 @@ const GetProjectDetails = async (req: Request, res: Response) => {
                 frameworks: project.frameworks || null,
                 status: project.status,
                 production: project.production,
+                gitRepoUrl: project.git_repo_url,
                 staging: project.staging,
                 preview: project.preview || [],
                 metrics: project.metrics,

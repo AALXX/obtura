@@ -4,7 +4,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname } from 'next/navigation'
 import { useAccountStore } from '@/lib/store/accountStore'
-import { FolderKanban, Rocket, Users, Menu, X, ChevronDown, Settings, LogOut, User, Bell, Search } from 'lucide-react'
+import { FolderCodeIcon, Rocket, Users, Menu, X, ChevronDown, Settings, LogOut, User, Bell, Search } from 'lucide-react'
 import { signOut, useSession } from 'next-auth/react'
 import axios from 'axios'
 
@@ -58,7 +58,7 @@ const NavBar = () => {
     }
 
     const navItems = [
-        { href: '/projects', label: 'Projects', icon: FolderKanban },
+        { href: '/projects', label: 'Projects', icon: FolderCodeIcon },
         { href: '/deployments', label: 'Deployments', icon: Rocket },
         { href: '/employees', label: 'Employees', icon: Users },
         { href: '/team', label: 'Team', icon: Users }

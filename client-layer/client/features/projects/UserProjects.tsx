@@ -1,6 +1,6 @@
 'use client'
 import React, { useEffect, useState } from 'react'
-import { Search, Users, Plus } from 'lucide-react'
+import { Search, Users, Plus, FolderCodeIcon } from 'lucide-react'
 import DialogCanvas from '@/common-components/DialogCanvas'
 import { ProjectResponse } from './Types/ProjectTypes'
 import AddProjectDialog from './components/AddProjectDialog'
@@ -43,7 +43,7 @@ const UserProjects: React.FC<{ projects: ProjectResponse[]; accessToken: string 
 
             {showAddProjectDialog && (
                 <DialogCanvas closeDialog={() => setShowAddProjectDialog(false)}>
-                    <AddProjectDialog accessToken={props.accessToken} closeDialog={() => setShowAddProjectDialog(false)} setProjects={setProjects} teams={teams} />
+                    <AddProjectDialog accessToken={props.accessToken} closeDialog={() => setShowAddProjectDialog(false)} setProjects={setProjects} teams={teams}  />
                 </DialogCanvas>
             )}
 
@@ -59,7 +59,7 @@ const UserProjects: React.FC<{ projects: ProjectResponse[]; accessToken: string 
 
                     {projects.filter(project => project.projectName.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
                         <div className="py-10 text-center text-gray-400">
-                            <Users size={44} className="mx-auto mb-3 opacity-50" />
+                            <FolderCodeIcon size={44} className="mx-auto mb-3 opacity-50" />
                             <p className="text-base">No projects found</p>
                         </div>
                     )}
