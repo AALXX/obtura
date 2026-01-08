@@ -1,25 +1,58 @@
 'use client'
-import React, { useState } from 'react'
-import { Rocket, Settings, Activity, Database, Globe, GitBranch, Clock, CheckCircle2, XCircle, AlertCircle, Eye, Code, Server, Lock, RotateCcw, Play, Pause, Plus, Trash2, Copy, ExternalLink, TrendingUp, Zap, Shield, Layers, Package, Hammer, Upload, Calendar } from 'lucide-react'
+import React, { useRef, useState } from 'react'
+import { Rocket, Settings, Activity, Database, Globe, GitBranch, Clock, CheckCircle2, XCircle, AlertCircle, Eye, Code, Server, Lock, RotateCcw, Play, Pause, Plus, Trash2, Copy, ExternalLink, TrendingUp, Zap, Shield, Layers, Package, Hammer, Upload, Calendar, Save } from 'lucide-react'
 import { ProjectData } from './Types/ProjectTypes'
 import EnvFileUpload from '../account/components/EnvFileUpload'
 import DialogCanvas from '@/common-components/DialogCanvas'
 import axios from 'axios'
-import BuildDialog from './components/buildDialog'
+import BuildDialog from './components/BuildDialog'
+import BuildCard, { Build, BuildStatus } from './components/BuildCard'
+import BuildLogsViewer from './components/BuildLogsViewer'
+import EnvVarsCard from './components/EnvVarCard'
 
-const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }> = ({ projectData, accessToken }) => {
+const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; services: { service_name: string; env_vars: Record<string, string> }[] }> = ({ projectData, accessToken, services }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'environment' | 'settings' | 'monitoring' | 'builds'>('overview')
-    const [envVars, setEnvVars] = useState([
-        { key: 'DATABASE_URL', value: '••••••••••••', isSecret: false },
-        { key: 'API_KEY', value: '••••••••••••', isSecret: true },
-        { key: 'NODE_ENV', value: 'production', isSecret: false }
-    ])
+
+    const [envVars, setEnvVars] = useState<{ key: string; value: string; service: string }[]>(
+        services.flatMap(service =>
+            Object.entries(service.env_vars).map(([key, value]) => ({
+                key,
+                value,
+                service: service.service_name
+            }))
+        )
+    )
+    const [hasChanges, setHasChanges] = useState(false)
+    const [isSaving, setIsSaving] = useState(false)
+    const [selectedService, setSelectedService] = useState('')
+
+    const serviceNames = Array.from(new Set(services.map(s => s.service_name)))
+
     const [showAddEnv, setShowAddEnv] = useState(false)
     const [newEnvKey, setNewEnvKey] = useState('')
     const [newEnvValue, setNewEnvValue] = useState('')
+    const [newEnvService, setNewEnvService] = useState('')
     const [isDeploying, setIsDeploying] = useState(false)
     const [openBuildDialog, setOpenBuildDialog] = useState(false)
     const [showEnvFileDialog, setShowEnvFileDialog] = useState(false)
+
+    const [currentBuildId, setCurrentBuildId] = useState<string | null>(null)
+
+        const [builds, setBuilds] = useState<Build[]>(
+            projectData.builds.map(build => ({
+                id: build.id,
+                status: build.status === 'completed' ? 'success' : (build.status as BuildStatus),
+                branch: build.branch,
+                commit: build.commit,
+                startTime: build.createdAt,
+                duration: build.buildTime || undefined,
+                framework: build.framework || undefined,
+                initiatedBy: build.initiatedBy || undefined,
+                errorMessage: build.errorMessage || undefined
+            }))
+        )
+    const [selectedBuild, setSelectedBuild] = useState<Build | null>(null)
+    const [showBuildLogs, setShowBuildLogs] = useState(false)
 
     const handleDeploy = (environment: string) => {
         setIsDeploying(true)
@@ -30,30 +63,142 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
     }
 
     const handleAddEnvVar = () => {
-        if (newEnvKey && newEnvValue) {
-            setEnvVars([...envVars, { key: newEnvKey, value: newEnvValue, isSecret: true }])
+        if (newEnvKey && newEnvValue && (selectedService !== '__new__' ? selectedService : newEnvService)) {
+            const service = selectedService === '__new__' ? newEnvService : selectedService
+            setEnvVars(prev => [...prev, { key: newEnvKey, value: newEnvValue, service }])
             setNewEnvKey('')
             setNewEnvValue('')
+            setNewEnvService('')
+            setSelectedService('')
             setShowAddEnv(false)
+            setHasChanges(true)
         }
     }
 
     const handleEnvFileUpload = async (data: { envLocation: string; envFile: File }) => {
-        let formData = new FormData()
-        formData.append('envLocation', data.envLocation)
-        formData.append('file', data.envFile)
-        formData.append('projectId', projectData.id)
-        formData.append('accessToken', accessToken)
+        try {
+            let formData = new FormData()
+            formData.append('envLocation', data.envLocation)
+            formData.append('envFile', data.envFile)
+            formData.append('projectId', projectData.id)
+            formData.append('accessToken', accessToken)
 
-        const resp = await axios.post(`${process.env.NEXT_PUBLIC_BACKEND_URL}/projects-manager/env-config`, formData, {
-            headers: {
-                'Content-Type': 'multipart/form-data'
+            const resp = await axios.post<{ vars: { service: string; envVars: Record<string, string> } }>(`${process.env.NEXT_PUBLIC_BACKEND_URL}/projects-manager/env-config`, formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            })
+
+            if (resp.status === 200 && resp.data.vars) {
+                const { service, envVars } = resp.data.vars
+
+                const newEnvVars = Object.entries(envVars).map(([key, value]) => ({
+                    key,
+                    value: value as string,
+                    service
+                }))
+
+                setEnvVars(prev => {
+                    const filtered = prev.filter(env => env.service !== service)
+                    return [...filtered, ...newEnvVars]
+                })
+
+                setShowEnvFileDialog(false)
             }
-        })
-
-        if (resp.status === 200) {
-            alert('Environment file uploaded successfully!')
+        } catch (error) {
+            console.error('Error uploading env file:', error)
+            alert('Failed to upload environment file')
         }
+    }
+
+    const handleUpdateEnvVar = (index: number, field: 'key' | 'value', newValue: string) => {
+        setEnvVars(prev => {
+            const updated = [...prev]
+            updated[index] = { ...updated[index], [field]: newValue }
+            return updated
+        })
+        setHasChanges(true)
+    }
+
+    const handleDeleteEnvVar = (index: number) => {
+        setEnvVars(prev => prev.filter((_, i) => i !== index))
+        setHasChanges(true)
+    }
+
+    const handleSaveAllChanges = async () => {
+        setIsSaving(true)
+        try {
+            const groupedByService: Record<string, Record<string, string>> = {}
+
+            serviceNames.forEach(serviceName => {
+                groupedByService[serviceName] = {}
+            })
+
+            envVars.forEach(env => {
+                if (!groupedByService[env.service]) {
+                    groupedByService[env.service] = {}
+                }
+                groupedByService[env.service][env.key] = env.value
+            })
+
+            const response = await axios.put(`${process.env.NEXT_PUBLIC_BACKEND_URL}/projects-manager/update-env-config`, {
+                projectId: projectData.id,
+                accessToken: accessToken,
+                services: Object.entries(groupedByService).map(([serviceName, vars]) => ({
+                    service_name: serviceName,
+                    env_vars: vars
+                }))
+            })
+
+            if (response.status === 200) {
+                setHasChanges(false)
+            }
+        } catch (error) {
+            console.error('Error updating env variables:', error)
+            alert('Failed to update environment variables')
+        } finally {
+            setIsSaving(false)
+        }
+    }
+
+    
+    const handleStartBuild = async () => {
+        try {
+            const resp = await axios.post<{ buildId: string; commitHash: string; branch: string; status: string }>(`${process.env.NEXT_PUBLIC_BACKEND_URL}/projects-manager/trigger-build`, {
+                projectId: projectData.id,
+                accessToken: accessToken
+            })
+
+            console.log('Build triggered:', resp.data)
+
+            if (resp.status !== 200 || !resp.data.buildId) {
+                window.alert('Failed to start build. Please try again.')
+                return
+            }
+
+            const newBuildId = resp.data.buildId
+            setCurrentBuildId(newBuildId)
+            setOpenBuildDialog(true)
+
+            setBuilds(prev => [
+                {
+                    id: newBuildId,
+                    status: 'building',
+                    branch: resp.data.branch || 'main',
+                    commit: resp.data.commitHash?.substring(0, 7) || 'pending...',
+                    startTime: new Date().toLocaleString(),
+                    duration: '0s'
+                },
+                ...prev
+            ])
+        } catch (error) {
+            console.error('Error starting build:', error)
+            window.alert('Failed to start build. Please try again.')
+        }
+    } 
+
+    const handleBuildStatusChange = (buildData: any) => {
+        setBuilds(prev => prev.map(build => (build.id === buildData.id ? { ...build, ...buildData, status: buildData.status as 'success' | 'failed' | 'building' } : build)))
     }
 
     const tabs = [
@@ -104,16 +249,9 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
                         </div>
 
                         <div className="flex items-center gap-3">
-                            <button
-                                onClick={() => {
-                                    setOpenBuildDialog(true)
-                                }}
-                                className="flex items-center gap-2 rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50"
-                            >
-                                <>
-                                    <Hammer size={18} />
-                                    Build
-                                </>
+                            <button onClick={handleStartBuild} className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50">
+                                <Hammer size={18} />
+                                Build
                             </button>
 
                             <button onClick={() => handleDeploy('production')} disabled={isDeploying} className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-orange-600 disabled:opacity-50">
@@ -133,14 +271,18 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
                     </div>
                 </div>
             </div>
-            {openBuildDialog && (
+            {openBuildDialog && currentBuildId && (
                 <DialogCanvas closeDialog={() => setOpenBuildDialog(false)}>
                     <BuildDialog
                         accessToken={accessToken}
                         projectId={projectData.id}
-                        gitRepoUrl={projectData.gitRepoUrl} // Add this line
-                        onBuildComplete={() => setOpenBuildDialog(false)}
-                        onClose={() => setOpenBuildDialog(false)}
+                        gitRepoUrl={projectData.gitRepoUrl}
+                        buildId={currentBuildId}
+                        onBuildStatusChange={handleBuildStatusChange}
+                        onClose={() => {
+                            setOpenBuildDialog(false)
+                            setCurrentBuildId(null)
+                        }}
                     />
                 </DialogCanvas>
             )}
@@ -396,12 +538,7 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
                                 <p className="text-sm text-zinc-400">Manage environment variables for your deployments</p>
                             </div>
                             <div className="flex items-center gap-3">
-                                <button
-                                    onClick={() => {
-                                        setShowEnvFileDialog(true)
-                                    }}
-                                    className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
-                                >
+                                <button onClick={() => setShowEnvFileDialog(true)} className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800">
                                     <Upload size={16} />
                                     Upload .env File
                                 </button>
@@ -409,6 +546,21 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
                                     <Plus size={16} />
                                     Add Variable
                                 </button>
+                                {hasChanges && (
+                                    <button onClick={handleSaveAllChanges} disabled={isSaving} className="flex items-center gap-2 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50">
+                                        {isSaving ? (
+                                            <>
+                                                <div className="h-4 w-4 animate-spin cursor-pointer rounded-full border-2 border-white border-t-transparent" />
+                                                Saving...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save size={16} />
+                                                Update Variables
+                                            </>
+                                        )}
+                                    </button>
+                                )}
                             </div>
                         </div>
 
@@ -422,6 +574,26 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
                                 <h3 className="mb-4 font-semibold">New Environment Variable</h3>
                                 <div className="space-y-3">
                                     <div>
+                                        <label className="mb-1 block text-sm text-zinc-400">Service/Location</label>
+                                        <select value={selectedService} onChange={e => setSelectedService(e.target.value)} className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-zinc-700 focus:outline-none">
+                                            <option value="">Select service...</option>
+                                            {serviceNames.map(name => (
+                                                <option key={name} value={name}>
+                                                    {name}
+                                                </option>
+                                            ))}
+                                            <option value="__new__">+ Add new service</option>
+                                        </select>
+                                    </div>
+
+                                    {selectedService === '__new__' && (
+                                        <div>
+                                            <label className="mb-1 block text-sm text-zinc-400">New Service Name</label>
+                                            <input type="text" value={newEnvService} onChange={e => setNewEnvService(e.target.value)} placeholder="backend, frontend, etc." className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-zinc-700 focus:outline-none" />
+                                        </div>
+                                    )}
+
+                                    <div>
                                         <label className="mb-1 block text-sm text-zinc-400">Key</label>
                                         <input type="text" value={newEnvKey} onChange={e => setNewEnvKey(e.target.value)} placeholder="DATABASE_URL" className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-white focus:border-zinc-700 focus:outline-none" />
                                     </div>
@@ -433,7 +605,14 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
                                         <button onClick={handleAddEnvVar} className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-medium text-white hover:bg-orange-600">
                                             Add Variable
                                         </button>
-                                        <button onClick={() => setShowAddEnv(false)} className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-900">
+                                        <button
+                                            onClick={() => {
+                                                setShowAddEnv(false)
+                                                setSelectedService('')
+                                                setNewEnvService('')
+                                            }}
+                                            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-900"
+                                        >
                                             Cancel
                                         </button>
                                     </div>
@@ -443,23 +622,7 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
 
                         <div className="space-y-2">
                             {envVars.map((env, idx) => (
-                                <div key={idx} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-[#1b1b1b] p-4">
-                                    <div className="flex items-center gap-3">
-                                        <Lock className="text-zinc-500" size={16} />
-                                        <div>
-                                            <div className="font-mono text-sm font-medium">{env.key}</div>
-                                            <div className="font-mono text-xs text-zinc-500">{env.value}</div>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button className="rounded-lg border border-zinc-700 p-2 text-zinc-400 hover:bg-zinc-900 hover:text-white">
-                                            <Copy size={16} />
-                                        </button>
-                                        <button className="rounded-lg border border-zinc-700 p-2 text-zinc-400 hover:bg-zinc-900 hover:text-red-500">
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-                                </div>
+                                <EnvVarsCard EnvVar={env} key={idx} id={idx} onUpdate={(field, value) => handleUpdateEnvVar(idx, field, value)} onDelete={() => handleDeleteEnvVar(idx)} />
                             ))}
                         </div>
                     </div>
@@ -633,43 +796,51 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string }
                         </div>
                     </div>
                 )}
+                {showBuildLogs && selectedBuild && (
+                    <DialogCanvas closeDialog={() => setShowBuildLogs(false)}>
+                        <BuildLogsViewer build={selectedBuild} onClose={() => setShowBuildLogs(false)} />
+                    </DialogCanvas>
+                )}
 
                 {activeTab === 'builds' && (
                     <div className="space-y-6">
-                        <div>
-                            <h2 className="text-xl font-semibold">Project Builds</h2>
-                            <p className="text-sm text-zinc-400">View your project builds</p>
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h2 className="text-xl font-semibold">Build History</h2>
+                                <p className="text-sm text-zinc-400">View all builds and their logs</p>
+                            </div>
+                            <button onClick={handleStartBuild} className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50">
+                                <Hammer size={18} />
+                                Build
+                            </button>
                         </div>
 
                         <div className="space-y-4">
-                            <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-5">
-                                <h3 className="mb-4 font-semibold">Builds</h3>
-                                <div className="space-y-4">
-                                    <div className="flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/50 p-4">
-                                        <div>
-                                            <div className="flex items-center gap-2">
-                                                <Code size={16} />
-                                                <span>Build 1</span>
-                                            </div>
-                                            <div className="mt-2 flex items-center gap-2 text-sm text-zinc-400">
-                                                <Calendar size={16} />
-                                                <span>2023-01-01</span>
-                                            </div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <div className="flex items-center gap-1">
-                                                <div className="h-2 w-2 rounded-full bg-green-500" />
-                                                <span>Success</span>
-                                            </div>
-                                            <div className="flex items-center gap-1">
-                                                <div className="h-2 w-2 rounded-full bg-red-500" />
-                                                <span>Failure</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                            {builds.map(build => (
+                                <BuildCard
+                                    key={build.id}
+                                    build={build}
+                                    onViewLogs={() => {
+                                        setSelectedBuild(build)
+                                        setShowBuildLogs(true)
+                                    }}
+                                />
+                            ))}
                         </div>
+
+                        {builds.length === 0 && (
+                            <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-12 text-center">
+                                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900">
+                                    <Hammer className="text-zinc-600" size={32} />
+                                </div>
+                                <h3 className="mb-2 text-lg font-semibold text-zinc-300">No Builds Yet</h3>
+                                <p className="mb-6 text-sm text-zinc-500">Start your first build to see it here</p>
+                                <button onClick={handleStartBuild} className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50">
+                                    <Hammer size={18} />
+                                    Build
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

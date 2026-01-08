@@ -17,4 +17,5 @@ router.post('/webhook', GitHubService.HandleWebhook);
 
 router.get('/repository-branches/:accessToken/:repo/:owner/:installationId', param('accessToken').not().isEmpty(), param('repo').not().isEmpty(), param('installationId').not().isEmpty(), param('owner').not().isEmpty(), GitHubService.GetRepositoryBranches);
 
+router.get('/project-token/:projectId', param('projectId').not().isEmpty(), GitHubService.GetProjectGitHubToken);
 export = router;

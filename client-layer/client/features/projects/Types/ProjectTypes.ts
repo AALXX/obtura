@@ -17,6 +17,19 @@ export interface ProjectData {
     preview: PreviewDeployment[]
     metrics: ProjectMetrics
     gitRepoUrl: string
+    builds: BuildData[] // Add this
+}
+
+export interface BuildData {
+    id: string
+    commit: string
+    branch: string
+    status: 'queued' | 'cloning' | 'installing' | 'building' | 'deploying' | 'completed' | 'failed' | 'cancelled' | 'timeout'
+    buildTime: string | null
+    framework: string | null
+    initiatedBy: string | null
+    createdAt: string
+    errorMessage: string | null
 }
 
 export interface FrameworkConfig {

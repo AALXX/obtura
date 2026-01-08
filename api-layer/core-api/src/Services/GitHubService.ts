@@ -192,7 +192,7 @@ const GetUserInstallations = async (req: Request, res: Response) => {
     }
 };
 
-const GetInstallationToken = async (installationId: number): Promise<string> => {
+export const GetInstallationToken = async (installationId: number): Promise<string> => {
     const cacheKey = `github:token:${installationId}`;
     const cachedToken = await redis.get(cacheKey);
 
@@ -218,23 +218,57 @@ const GetInstallationToken = async (installationId: number): Promise<string> => 
     return data.token;
 };
 
-const GetProjectGitHubToken = async (projectId: string): Promise<string> => {
-    const query = `
-    SELECT gi.installation_id
-    FROM projects p
-    JOIN github_installations gi ON gi.user_id = p.user_id
-    WHERE p.project_id = $1
-    LIMIT 1
-  `;
+const GetProjectGitHubToken = async (req: any, res: any) => {
+    try {
+        const { projectId } = req.params;
 
-    const result = await pool.query(query, [projectId]);
+        if (!projectId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Project ID required',
+            });
+        }
 
-    if (result.rows.length === 0) {
-        throw new Error('No GitHub installation found for this project');
+        const query = `
+      SELECT gi.installation_id
+      FROM projects p
+      LEFT JOIN github_installations gi ON gi.installation_id = p.github_installation_id
+      WHERE p.id = $1
+    `;
+
+        const result = await pool.query(query, [projectId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Project not found',
+            });
+        }
+
+        const installationId = result.rows[0].installation_id;
+
+        if (!installationId) {
+            // No GitHub integration for this project
+            return res.status(404).json({
+                success: false,
+                message: 'No GitHub integration found for project',
+            });
+        }
+
+        // Get installation token (cached for 50 minutes)
+        const token = await GetInstallationToken(installationId);
+
+        return res.status(200).json({
+            success: true,
+            token: token,
+        });
+    } catch (error: any) {
+        console.error('Error getting project token:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
     }
-
-    const installationId = result.rows[0].installation_id;
-    return GetInstallationToken(installationId);
 };
 
 const GetRepositoryBranches = async (req: Request, res: Response) => {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
@@ -108,6 +109,7 @@ func (b *Builder) BuildImageWithSandbox(ctx context.Context, projectPath string,
 		Tags:        []string{imageTag},
 		Dockerfile:  "Dockerfile",
 		Remove:      true,
+		ForceRemove: true, // 👈 Force remove intermediate containers even on failure
 		NoCache:     false,
 		Platform:    "linux/amd64",
 		Memory:      sandboxConfig.MemoryLimit,
@@ -118,6 +120,8 @@ func (b *Builder) BuildImageWithSandbox(ctx context.Context, projectPath string,
 	})
 
 	if err != nil {
+		// Clean up on failure
+		b.CleanupBuildArtifacts(context.Background())
 		return nil, fmt.Errorf("Docker build failed: %w", err)
 	}
 
@@ -196,6 +200,34 @@ func encodeAuthConfig(authConfig registry.AuthConfig) (string, error) {
 		return "", err
 	}
 	return base64.URLEncoding.EncodeToString(encodedJSON), nil
+}
+
+func (b *Builder) CleanupBuildArtifacts(ctx context.Context) error {
+	var totalReclaimed uint64
+
+	pruneFilters := filters.NewArgs()
+	pruneFilters.Add("dangling", "true")
+
+	imageReport, err := b.docker.ImagesPrune(ctx, pruneFilters)
+	if err != nil {
+		log.Printf("⚠️ Failed to prune dangling images: %v", err)
+	} else {
+		totalReclaimed += imageReport.SpaceReclaimed
+	}
+
+	// 2. Remove stopped containers
+	containerReport, err := b.docker.ContainersPrune(ctx, filters.Args{})
+	if err != nil {
+		log.Printf("⚠️ Failed to prune stopped containers: %v", err)
+	} else {
+		totalReclaimed += containerReport.SpaceReclaimed
+	}
+
+	if totalReclaimed > 0 {
+		log.Printf("🧹 Cleaned up %d MB of Docker artifacts", totalReclaimed/(1024*1024))
+	}
+
+	return nil
 }
 
 // Close closes the Docker client connection

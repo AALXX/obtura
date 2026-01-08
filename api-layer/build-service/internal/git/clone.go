@@ -12,30 +12,7 @@ import (
 	"github.com/go-git/go-git/v6/plumbing/transport/http"
 )
 
-func CloneRepository(gitURL string, branch string, path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("failed to create parent directory: %w", err)
-	}
-
-	cloneOptions := &git.CloneOptions{
-		URL:      gitURL,
-		Progress: os.Stdout,
-	}
-
-	if branch != "" {
-		cloneOptions.ReferenceName = plumbing.NewBranchReferenceName(branch)
-		cloneOptions.SingleBranch = true
-	}
-
-	_, err := git.PlainClone(path, cloneOptions)
-	if err != nil {
-		return fmt.Errorf("failed to clone repository: %w", err)
-	}
-
-	return nil
-}
-
-func CloneRepositoryWithAuth(gitURL string, branch string, path string, username string, token string) error {
+func CloneRepositoryWithGitHubApp(gitURL string, branch string, path string, token string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("failed to create parent directory: %w", err)
 	}
@@ -44,7 +21,7 @@ func CloneRepositoryWithAuth(gitURL string, branch string, path string, username
 		URL:      gitURL,
 		Progress: os.Stdout,
 		Auth: &http.BasicAuth{
-			Username: username,
+			Username: "x-access-token", // GitHub App tokens use this username
 			Password: token,
 		},
 	}

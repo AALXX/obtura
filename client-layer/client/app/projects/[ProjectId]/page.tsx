@@ -23,14 +23,14 @@ const ProjectPage = async ({ params }: { params: { ProjectId: string } }) => {
         }
 
         const projectData = await apiClient.get<{ project: ProjectData }>(`${process.env.BACKEND_URL}/projects-manager/get-project-details/${ProjectId}/${session.backendToken}`)
-        const projectEnvVariables = await apiClient.get<{ variables: string[] }>(`${process.env.BACKEND_URL}/projects-manager/get-project-environment-variables/${ProjectId}/${session.backendToken}`)
+        const projectEnvVariables = await apiClient.get<{ services: { service_name: string; env_vars: Record<string, string> }[] }>(`${process.env.BACKEND_URL}/projects-manager/get-project-environment-variables/${ProjectId}/${session.backendToken}`)
 
         const errorComponent = getErrorComponent(projectData.status, 'projects')
         if (errorComponent) return errorComponent
 
         return (
             <div>
-                <ProjectDetails projectData={projectData.data.project} accessToken={session.backendToken!} />
+                <ProjectDetails projectData={projectData.data.project} accessToken={session.backendToken!} services={projectEnvVariables.data.services} />
             </div>
         )
     } catch (error) {

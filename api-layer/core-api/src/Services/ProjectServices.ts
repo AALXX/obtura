@@ -5,6 +5,8 @@ import db from '../config/postgresql';
 import { getUserIdFromSessionToken, getDataRegion, normalizeServiceName, getCompanyIdFromSessionToken } from '../lib/utils';
 import rabbitmq from '../config/rabbitmql';
 import crypto from 'crypto';
+import { Octokit } from '@octokit/rest';
+import { GetInstallationToken } from './GitHubService';
 
 /**
  * Registers a new user account with Google authentication
@@ -310,6 +312,28 @@ const UploadEnvConfig = async (req: Request, res: Response) => {
 
         const serviceName = normalizeServiceName(envLocation);
 
+        const envVars: Record<string, string> = {};
+        const lines = envFileContent.split('\n');
+
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine || trimmedLine.startsWith('#')) {
+                continue;
+            }
+
+            const equalIndex = trimmedLine.indexOf('=');
+            if (equalIndex > 0) {
+                const key = trimmedLine.substring(0, equalIndex).trim();
+                let value = trimmedLine.substring(equalIndex + 1).trim();
+
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                    value = value.slice(1, -1);
+                }
+
+                envVars[key] = value;
+            }
+        }
+
         await db.query(
             `INSERT INTO project_env_configs (project_id, service_name, env_content, folder_location, updated_at)
              VALUES ($1, $2, $3, $4, NOW())
@@ -321,10 +345,56 @@ const UploadEnvConfig = async (req: Request, res: Response) => {
         return res.status(200).json({
             success: true,
             message: 'Environment configurations uploaded successfully',
+            vars: {
+                service: serviceName,
+                envVars: envVars,
+            },
         });
     } catch (error) {
         console.error('Upload env config error:', error);
         res.status(500).json({ error: 'Failed to upload env configs' });
+    }
+};
+
+const UpdateEnvVariables = async (req: Request, res: Response) => {
+    const errors = CustomRequestValidationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(401).json({ error: true, errors: errors.array() });
+    }
+
+    try {
+        const { projectId, services } = req.body;
+
+        for (const service of services) {
+            const { service_name, env_vars } = service;
+
+            const envContent = Object.entries(env_vars)
+                .map(([key, value]) => {
+                    const needsQuotes = /[\s#]/.test(value as string);
+                    const escapedValue = needsQuotes ? `"${value}"` : value;
+                    return `${key}=${escapedValue}`;
+                })
+                .join('\n');
+
+            const serviceName = normalizeServiceName(service_name);
+            const encryptedContent = encryptEnvContent(envContent);
+
+            await db.query(
+                `INSERT INTO project_env_configs (project_id, service_name, env_content, folder_location, updated_at)
+                 VALUES ($1, $2, $3, $4, NOW())
+                 ON CONFLICT (project_id, service_name)
+                 DO UPDATE SET env_content = $3, updated_at = NOW()`,
+                [projectId, serviceName, encryptedContent, service_name],
+            );
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Environment variables updated successfully',
+        });
+    } catch (error) {
+        console.error('Update env variables error:', error);
+        res.status(500).json({ error: 'Failed to update environment variables' });
     }
 };
 
@@ -387,7 +457,7 @@ const TriggerBuild = async (req: Request, res: Response) => {
     }
 
     try {
-        const { accessToken, projectId, commitHash, branch } = req.body;
+        const { accessToken, projectId } = req.body;
 
         const userID = await getUserIdFromSessionToken(accessToken);
 
@@ -395,6 +465,76 @@ const TriggerBuild = async (req: Request, res: Response) => {
             return res.status(401).json({
                 error: true,
                 errmsg: 'Invalid or expired access token',
+            });
+        }
+
+        const projectResult = await db.query(
+            `SELECT p.*, gi.installation_id 
+             FROM projects p
+             LEFT JOIN github_installations gi ON gi.installation_id = p.github_installation_id
+             WHERE p.id = $1`,
+            [projectId],
+        );
+
+        if (projectResult.rows.length === 0) {
+            return res.status(404).json({
+                error: true,
+                errmsg: 'Project not found',
+            });
+        }
+
+        const project = projectResult.rows[0];
+
+        const gitBranches = project.git_branches || [];
+        const productionBranch = gitBranches.find((b: any) => b.type === 'production');
+
+        if (!productionBranch || !productionBranch.branch) {
+            return res.status(400).json({
+                error: true,
+                errmsg: 'No production branch configured for this project',
+            });
+        }
+
+        const branch = productionBranch.branch;
+
+        if (!project.installation_id || !project.git_repo_url) {
+            return res.status(400).json({
+                error: true,
+                errmsg: 'GitHub integration not configured for this project',
+            });
+        }
+
+        let commitHash: string;
+
+        try {
+            const token = await GetInstallationToken(project.installation_id);
+
+            const repoMatch = project.git_repo_url.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)/);
+
+            if (!repoMatch) {
+                return res.status(400).json({
+                    error: true,
+                    errmsg: 'Invalid GitHub repository URL',
+                });
+            }
+
+            const [, owner, repo] = repoMatch;
+
+            const octokit = new Octokit({ auth: token });
+            const { data } = await octokit.rest.repos.getBranch({
+                owner,
+                repo,
+                branch: branch,
+            });
+
+            commitHash = data.commit.sha;
+
+            console.log(`Fetched latest commit: ${commitHash} for branch ${branch}`);
+        } catch (githubError: any) {
+            console.error('Error fetching commit from GitHub:', githubError);
+            return res.status(500).json({
+                error: true,
+                errmsg: 'Failed to fetch latest commit from GitHub: ' + githubError.message,
             });
         }
 
@@ -421,6 +561,8 @@ const TriggerBuild = async (req: Request, res: Response) => {
 
         return res.status(200).json({
             buildId: buildId,
+            commitHash: commitHash,
+            branch: branch,
             status: 'queued',
         });
     } catch (error) {
@@ -473,6 +615,30 @@ const GetProjectDetails = async (req: Request, res: Response) => {
                     AND d.status = 'deployed'
                 ORDER BY d.created_at DESC
                 LIMIT 10
+            ),
+            recent_builds AS (
+                SELECT 
+                    b.id,
+                    b.commit_hash,
+                    b.branch,
+                    b.status,
+                    b.build_time_seconds,
+                    b.error_message,
+                    b.created_at,
+                    b.completed_at,
+                    u.name as initiated_by_name,
+                    u.email as initiated_by_email,
+                    EXTRACT(EPOCH FROM (NOW() - b.created_at)) as seconds_ago,
+                    CASE 
+                        WHEN b.metadata->>'frameworks' IS NOT NULL THEN
+                            (b.metadata->'frameworks'->0->>'Name')
+                        ELSE NULL
+                    END as framework
+                FROM builds b
+                LEFT JOIN users u ON u.id = b.initiated_by_user_id
+                WHERE b.project_id = $1
+                ORDER BY b.created_at DESC
+                LIMIT 20
             ),
             latest_metrics AS (
                 SELECT 
@@ -585,6 +751,39 @@ const GetProjectDetails = async (req: Request, res: Response) => {
                     '[]'::json
                 ) as preview,
                 
+                -- Builds
+                COALESCE(
+                    (
+                        SELECT json_agg(
+                            json_build_object(
+                                'id', rb.id,
+                                'commit', rb.commit_hash,
+                                'branch', rb.branch,
+                                'status', rb.status,
+                                'buildTime', CASE 
+                                    WHEN rb.build_time_seconds IS NOT NULL 
+                                    THEN CONCAT(FLOOR(rb.build_time_seconds / 60), 'm ', rb.build_time_seconds % 60, 's')
+                                    ELSE NULL
+                                END,
+                                'framework', rb.framework,
+                                'initiatedBy', CASE 
+                                    WHEN rb.initiated_by_name IS NOT NULL 
+                                    THEN rb.initiated_by_name
+                                    ELSE rb.initiated_by_email
+                                END,
+                                'createdAt', CASE 
+                                    WHEN rb.seconds_ago < 3600 THEN CONCAT(FLOOR(rb.seconds_ago / 60), ' minutes ago')
+                                    WHEN rb.seconds_ago < 86400 THEN CONCAT(FLOOR(rb.seconds_ago / 3600), ' hours ago')
+                                    ELSE CONCAT(FLOOR(rb.seconds_ago / 86400), ' days ago')
+                                END,
+                                'errorMessage', rb.error_message
+                            )
+                        )
+                        FROM recent_builds rb
+                    ),
+                    '[]'::json
+                ) as builds,
+                
                 -- Metrics
                 json_build_object(
                     'uptime', CONCAT(COALESCE(m.uptime_percentage, 99.9), '%'),
@@ -627,6 +826,7 @@ const GetProjectDetails = async (req: Request, res: Response) => {
                 status: project.status,
                 production: project.production,
                 gitRepoUrl: project.git_repo_url,
+                builds: project.builds || [],
                 staging: project.staging,
                 preview: project.preview || [],
                 metrics: project.metrics,
@@ -648,5 +848,6 @@ export default {
     TriggerBuild,
     GetEnvConfigs,
     UploadEnvConfig,
+    UpdateEnvVariables,
     CreateProject,
 };

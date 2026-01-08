@@ -12,10 +12,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -226,11 +231,10 @@ func (w *Worker) writeEnvFiles(
 
 func (w *Worker) handleBuildJob(msg amqp.Delivery) {
 	var job struct {
-		GitURL     string `json:"git_repo_url"`
-		BuildID    string `json:"buildId"`
-		ProjectID  string `json:"projectId"`
-		CommitHash string `json:"commitHash"`
-		Branch     string `json:"branch"`
+		GitURL    string `json:"git_repo_url"`
+		BuildID   string `json:"buildId"`
+		ProjectID string `json:"projectId"`
+		Branch    string `json:"branch"`
 	}
 	ctx := context.Background()
 
@@ -273,6 +277,10 @@ LIMIT 1;
 
 	log.Printf("🏗️ Starting build %s for project %s (%s)", job.BuildID, job.ProjectID, planName)
 
+	w.streamStatus(job.BuildID, "queued", "Build queued")
+
+	buildStartTime := time.Now()
+
 	err = w.rateLimiter.CheckAndIncrementBuildLimit(ctx, job.ProjectID, limits)
 	if err != nil {
 		log.Printf("❌ Rate limit exceeded: %v", err)
@@ -294,30 +302,33 @@ LIMIT 1;
 			if buildCtx.Err() == context.DeadlineExceeded {
 				log.Printf("⏱️ Build %s exceeded time limit (%v)", job.BuildID, quotaLimits.MaxBuildDuration)
 				w.streamLog(job.BuildID, fmt.Sprintf("❌ Build exceeded time limit of %v", quotaLimits.MaxBuildDuration))
+				w.streamStatus(job.BuildID, "timeout", "Build timeout")
 				w.db.ExecContext(ctx, "UPDATE builds SET status = 'timeout', error_message = $1 WHERE id = $2",
 					fmt.Sprintf("Build exceeded %v limit", quotaLimits.MaxBuildDuration), job.BuildID)
 			}
 		case <-buildDone:
 		}
 	}()
-
 	defer func() {
 		buildDone <- true
 	}()
 
 	w.db.ExecContext(buildCtx, "UPDATE builds SET status = 'running', started_at = NOW() WHERE id = $1", job.BuildID)
+	w.streamStatus(job.BuildID, "running", "Build started")
 
 	row := w.db.QueryRowContext(buildCtx, "SELECT git_repo_url FROM projects WHERE id = $1", job.ProjectID)
-	dberr := row.Scan(&job.GitURL)
-	if dberr != nil {
-		if dberr == sql.ErrNoRows {
+	if err := row.Scan(&job.GitURL); err != nil {
+		if err == sql.ErrNoRows {
 			log.Printf("❌ Project not found: %s", job.ProjectID)
 			w.streamLog(job.BuildID, fmt.Sprintf("Project not found: %s", job.ProjectID))
 		} else {
-			log.Printf("❌ Failed to get project: %v", dberr)
-			w.streamLog(job.BuildID, fmt.Sprintf("Failed to get project: %v", dberr))
+			log.Printf("❌ Failed to get project: %v", err)
+			w.streamLog(job.BuildID, fmt.Sprintf("Failed to get project: %v", err))
 		}
-		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed' WHERE id = $1", job.BuildID)
+		w.streamStatus(job.BuildID, "failed", "Project not found")
+		buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+
+		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed' WHERE id = $1, build_time_seconds = $2", job.BuildID, buildTimeSeconds)
 		msg.Nack(false, false)
 		return
 	}
@@ -327,7 +338,7 @@ LIMIT 1;
 
 	envConfigs, err := w.fetchEnvConfigs(buildCtx, job.ProjectID)
 	if err != nil {
-		log.Printf("⚠️ Failed to fetch env configs: %v (continuing without env configs)", err)
+		log.Printf("⚠️ Failed to fetch env configs: %v", err)
 		w.streamLog(job.BuildID, "⚠️ No environment configurations found")
 	} else {
 		log.Printf("📋 Found %d env configurations for project", len(envConfigs))
@@ -345,16 +356,47 @@ LIMIT 1;
 		if err := os.RemoveAll(workDir); err != nil {
 			log.Printf("⚠️ Failed to cleanup workspace: %v", err)
 		}
+
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+
+		if err := w.builder.CleanupBuildArtifacts(cleanupCtx); err != nil {
+			log.Printf("⚠️ Failed to cleanup Docker artifacts: %v", err)
+		} else {
+			log.Printf("🧹 Docker cleanup completed")
+		}
 	}()
 
 	w.streamLog(job.BuildID, "Cloning repository...")
-	if err := git.CloneRepository(job.GitURL, job.Branch, workDir); err != nil {
-		log.Printf("❌ Failed to clone repository: %v", err)
-		w.streamLog(job.BuildID, fmt.Sprintf("Failed to clone repository: %v", err))
-		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
+	w.streamStatus(job.BuildID, "cloning", "Cloning repository")
+
+	githubToken, err := w.fetchGitHubToken(buildCtx, job.ProjectID)
+	if err != nil {
+		log.Printf("⚠️ Failed to fetch GitHub token: %v", err)
+		w.streamLog(job.BuildID, "⚠️ No GitHub integration found, attempting public clone")
+	}
+
+	var cloneErr error
+	if githubToken != "" {
+		w.streamLog(job.BuildID, "Using GitHub App authentication")
+		cloneErr = git.CloneRepositoryWithGitHubApp(job.GitURL, job.Branch, workDir, githubToken)
+	} else {
+		w.streamLog(job.BuildID, "⚠️ No GitHub integration found")
+		cloneErr = fmt.Errorf("no GitHub integration configured")
+	}
+
+	if cloneErr != nil {
+		log.Printf("❌ Failed to clone repository: %v", cloneErr)
+		w.streamLog(job.BuildID, fmt.Sprintf("Failed to clone repository: %v", cloneErr))
+		w.streamStatus(job.BuildID, "failed", "Failed to clone repository")
+		buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+
+		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3", cloneErr.Error(), job.BuildID, buildTimeSeconds)
 		msg.Nack(false, false)
 		return
 	}
+
+	w.streamLog(job.BuildID, "✅ Repository cloned successfully")
 
 	buildSize, err := w.calculateDirectorySize(workDir)
 	if err != nil {
@@ -364,18 +406,25 @@ LIMIT 1;
 			buildSize/(1024*1024), quotaLimits.MaxBuildSize/(1024*1024))
 		log.Printf("❌ %s", errMsg)
 		w.streamLog(job.BuildID, fmt.Sprintf("❌ %s", errMsg))
-		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", errMsg, job.BuildID)
+		buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+
+		w.streamStatus(job.BuildID, "failed", "Build size exceeds limit")
+		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3", errMsg, job.BuildID, buildTimeSeconds)
 		msg.Nack(false, false)
 		return
 	}
 
 	w.streamLog(job.BuildID, "Repository cloned successfully")
+	w.streamStatus(job.BuildID, "installing", "Detecting frameworks")
 
 	result, err := builder.DetectAllFrameworks(workDir)
 	if err != nil {
 		log.Printf("❌ Failed to detect frameworks: %v", err)
 		w.streamLog(job.BuildID, fmt.Sprintf("Failed to detect frameworks: %v", err))
-		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
+		w.streamStatus(job.BuildID, "failed", "Failed to detect frameworks")
+
+		buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID, buildTimeSeconds)
 		msg.Nack(false, false)
 		return
 	}
@@ -384,7 +433,6 @@ LIMIT 1;
 		log.Printf("📦 Detected monorepo with %d services:", len(result.Frameworks))
 		w.streamLog(job.BuildID, fmt.Sprintf("Detected monorepo with %d services", len(result.Frameworks)))
 		for _, fw := range result.Frameworks {
-			log.Printf("  - %s in %s/", fw.Name, fw.Path)
 			w.streamLog(job.BuildID, fmt.Sprintf("  - %s in %s/", fw.Name, fw.Path))
 		}
 	} else {
@@ -405,16 +453,30 @@ LIMIT 1;
 			"memoryGB":         quotaLimits.MemoryGB,
 		},
 	})
-
 	w.db.ExecContext(buildCtx, "UPDATE builds SET metadata = $1 WHERE id = $2", string(frameworksJSON), job.BuildID)
 
 	if len(envConfigs) > 0 {
 		if err := w.writeEnvFiles(job.BuildID, workDir, envConfigs, result.Frameworks, result.IsMonorepo); err != nil {
 			log.Printf("⚠️ Failed to write env files: %v", err)
 			w.streamLog(job.BuildID, fmt.Sprintf("Failed to write env files: %v", err))
+		} else {
+			w.streamLog(job.BuildID, "🔍 Validating environment variables...")
+			if err := w.validateEnvVariables(job.BuildID, workDir, result.Frameworks); err != nil {
+				log.Printf("❌ Environment validation failed: %v", err)
+				w.streamStatus(job.BuildID, "failed", "Missing required environment variables")
+				buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+				w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3",
+					fmt.Sprintf("Missing required environment variables: %v", err), job.BuildID, buildTimeSeconds)
+				msg.Nack(false, false)
+				return
+			}
 		}
 	} else {
-		w.streamLog(job.BuildID, "⚠️ No environment configurations uploaded - using defaults")
+		w.streamLog(job.BuildID, "⚠️ No environment configurations uploaded")
+		if err := w.validateEnvVariables(job.BuildID, workDir, result.Frameworks); err != nil {
+			log.Printf("⚠️ Environment validation warning: %v", err)
+			w.streamLog(job.BuildID, "⚠️ BUILD WARNING: Application may require environment variables!")
+		}
 	}
 
 	for _, framework := range result.Frameworks {
@@ -424,15 +486,13 @@ LIMIT 1;
 		if !pkg.FileExists(dockerfilePath) {
 			w.streamLog(job.BuildID, fmt.Sprintf("Generating Dockerfile for %s...", framework.Name))
 
-			if framework.Name == "Next.js" {
-				w.streamLog(job.BuildID, "Checking Next.js configuration for standalone output...")
-			}
-
 			dockerfile, err := builder.GenerateDockerfile(framework, serviceDir)
 			if err != nil {
 				log.Printf("❌ Failed to generate Dockerfile for %s: %v", framework.Name, err)
 				w.streamLog(job.BuildID, fmt.Sprintf("Failed to generate Dockerfile for %s: %v", framework.Name, err))
-				w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
+				w.streamStatus(job.BuildID, "failed", "Failed to generate Dockerfile")
+				buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+				w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3", err.Error(), job.BuildID, buildTimeSeconds)
 				msg.Nack(false, false)
 				return
 			}
@@ -440,23 +500,15 @@ LIMIT 1;
 			if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
 				log.Printf("❌ Failed to write Dockerfile for %s: %v", framework.Name, err)
 				w.streamLog(job.BuildID, fmt.Sprintf("Failed to write Dockerfile for %s: %v", framework.Name, err))
-				w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
+				w.streamStatus(job.BuildID, "failed", "Failed to write Dockerfile")
+				buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+
+				w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3", err.Error(), job.BuildID, buildTimeSeconds)
 				msg.Nack(false, false)
 				return
 			}
 
 			w.streamLog(job.BuildID, fmt.Sprintf("✅ Generated Dockerfile for %s in %s/", framework.Name, framework.Path))
-
-			if framework.Name == "Next.js" {
-				configFiles := []string{"next.config.js", "next.config.mjs", "next.config.ts"}
-				for _, cf := range configFiles {
-					cfPath := filepath.Join(serviceDir, cf)
-					if pkg.FileExists(cfPath) {
-						w.streamLog(job.BuildID, fmt.Sprintf("Using Next.js config: %s", cf))
-						break
-					}
-				}
-			}
 		} else {
 			w.streamLog(job.BuildID, fmt.Sprintf("Using existing Dockerfile for %s in %s/", framework.Name, framework.Path))
 		}
@@ -471,7 +523,10 @@ LIMIT 1;
 		if err != nil {
 			log.Printf("❌ Failed to generate docker-compose.yml: %v", err)
 			w.streamLog(job.BuildID, fmt.Sprintf("Failed to generate docker-compose.yml: %v", err))
-			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
+			w.streamStatus(job.BuildID, "failed", "Failed to generate docker-compose.yml")
+				buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+
+			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3", err.Error(), job.BuildID, buildTimeSeconds)
 			msg.Nack(false, false)
 			return
 		}
@@ -480,6 +535,7 @@ LIMIT 1;
 		if err := os.WriteFile(composePath, []byte(composeFile), 0644); err != nil {
 			log.Printf("❌ Failed to write docker-compose.yml: %v", err)
 			w.streamLog(job.BuildID, fmt.Sprintf("Failed to write docker-compose.yml: %v", err))
+			w.streamStatus(job.BuildID, "failed", "Failed to write docker-compose.yml")
 			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
 			msg.Nack(false, false)
 			return
@@ -493,9 +549,10 @@ LIMIT 1;
 			w.streamLog(job.BuildID, "Generated BUILD_README.md with deployment instructions")
 		}
 	}
+	w.streamStatus(job.BuildID, "building", "Building Docker images")
 
 	sandboxConfig := security.SandboxConfig{
-		CPUQuota:     int64(quotaLimits.CPUCores) * 100000, // Convert cores to quota
+		CPUQuota:     int64(quotaLimits.CPUCores) * 100000,
 		MemoryLimit:  int64(quotaLimits.MemoryGB) * 1024 * 1024 * 1024,
 		PidsLimit:    512,
 		NoNewPrivs:   true,
@@ -512,7 +569,9 @@ LIMIT 1;
 		case <-buildCtx.Done():
 			log.Printf("⏱️ Build timeout during image %d/%d", i+1, len(result.Frameworks))
 			w.streamLog(job.BuildID, "❌ Build timeout reached")
-			w.db.ExecContext(ctx, "UPDATE builds SET status = 'timeout' WHERE id = $1", job.BuildID)
+			w.streamStatus(job.BuildID, "timeout", "Build timeout")
+			buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+			w.db.ExecContext(ctx, "UPDATE builds SET status = 'timeout' WHERE id = $1, build_time_seconds = $2", job.BuildID, buildTimeSeconds)
 			msg.Nack(false, false)
 			return
 		default:
@@ -529,16 +588,32 @@ LIMIT 1;
 		if err != nil {
 			log.Printf("❌ Docker build failed for %s: %v", framework.Name, err)
 			w.streamLog(job.BuildID, fmt.Sprintf("Docker build failed for %s: %v", framework.Name, err))
-			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
+			w.streamStatus(job.BuildID, "failed", fmt.Sprintf("Docker build failed for %s", framework.Name))
+			buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3", err.Error(), job.BuildID, buildTimeSeconds)
 			msg.Nack(false, false)
 			return
 		}
 
 		buildFailed := false
+		criticalError := false
+		var lastError string
 		scanner := bufio.NewScanner(buildOutput)
+
 		for scanner.Scan() {
 			line := scanner.Text()
 			w.streamLog(job.BuildID, line)
+
+			if strings.Contains(line, "ESLint:") ||
+				strings.Contains(line, "⨯ ESLint") ||
+				strings.Contains(line, "Failed to load config") {
+				continue
+			}
+
+			if strings.Contains(line, "Error occurred prerendering") {
+				w.streamLog(job.BuildID, "💡 Prerender error detected - check environment variables")
+				criticalError = true
+			}
 
 			var buildMsg struct {
 				Error       string `json:"error"`
@@ -550,8 +625,19 @@ LIMIT 1;
 
 			if json.Unmarshal([]byte(line), &buildMsg) == nil {
 				if buildMsg.Error != "" || buildMsg.ErrorDetail.Message != "" {
-					buildFailed = true
-					log.Printf("❌ Build error detected: %s", buildMsg.Error)
+					errorMsg := buildMsg.Error
+					if errorMsg == "" {
+						errorMsg = buildMsg.ErrorDetail.Message
+					}
+
+					if strings.Contains(errorMsg, "returned a non-zero code") ||
+						strings.Contains(errorMsg, "executor failed") ||
+						strings.Contains(errorMsg, "The command") {
+						buildFailed = true
+						criticalError = true
+						lastError = errorMsg
+						log.Printf("❌ Critical build error detected: %s", lastError)
+					}
 				}
 			}
 		}
@@ -560,13 +646,24 @@ LIMIT 1;
 		if err := scanner.Err(); err != nil {
 			log.Printf("⚠️ Error reading build output: %v", err)
 			buildFailed = true
+			criticalError = true
 		}
 
-		if buildFailed {
+		if buildFailed && criticalError {
 			log.Printf("❌ Docker build failed for %s", framework.Name)
 			w.streamLog(job.BuildID, fmt.Sprintf("❌ Docker build failed for %s", framework.Name))
-			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2",
-				"Docker build failed", job.BuildID)
+			w.streamStatus(job.BuildID, "failed", "Build failed")
+
+			if strings.Contains(lastError, "npm run build") || strings.Contains(lastError, "prerender") {
+				w.streamLog(job.BuildID, "🔍 Troubleshooting tips:")
+				w.streamLog(job.BuildID, "   • Verify all required environment variables are configured")
+				w.streamLog(job.BuildID, "   • Check that NEXT_PUBLIC_* variables are set for client-side code")
+			}
+
+			buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3",
+				"Docker build failed", job.BuildID, buildTimeSeconds)
+			w.builder.CleanupBuildArtifacts(context.Background())
 			msg.Nack(false, false)
 			return
 		}
@@ -577,20 +674,33 @@ LIMIT 1;
 		if err := w.builder.PushImage(buildCtx, imageTag); err != nil {
 			log.Printf("❌ Image push failed for %s: %v", framework.Name, err)
 			w.streamLog(job.BuildID, fmt.Sprintf("Image push failed for %s: %v", framework.Name, err))
-			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2", err.Error(), job.BuildID)
+			w.streamStatus(job.BuildID, "failed", "Image push failed")
+			buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
+			w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', error_message = $1 WHERE id = $2, build_time_seconds = $3", err.Error(), job.BuildID, buildTimeSeconds)
 			msg.Nack(false, false)
 			return
 		}
 
 		w.streamLog(job.BuildID, fmt.Sprintf("✅ Image pushed successfully for %s", framework.Name))
+
 	}
 
+	buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
 	imageTagsJSON, _ := json.Marshal(imageTags)
-	w.db.ExecContext(ctx, "UPDATE builds SET image_tags = $1, status = 'completed', completed_at = NOW() WHERE id = $2",
-		string(imageTagsJSON), job.BuildID)
+	w.db.ExecContext(ctx,
+		"UPDATE builds SET image_tags = $1, status = 'completed', completed_at = NOW(), build_time_seconds = $2 WHERE id = $3",
+		string(imageTagsJSON), buildTimeSeconds, job.BuildID)
 
-	log.Printf("✅ Build %s completed successfully with %d services", job.BuildID, len(result.Frameworks))
-	w.streamLog(job.BuildID, fmt.Sprintf("✅ Build completed successfully with %d service(s)", len(result.Frameworks)))
+	log.Printf("✅ Build %s completed successfully with %d services in %d seconds",
+		job.BuildID, len(result.Frameworks), buildTimeSeconds)
+	w.streamLog(job.BuildID, fmt.Sprintf("✅ Build completed successfully with %d service(s) in %dm %ds",
+		len(result.Frameworks), buildTimeSeconds/60, buildTimeSeconds%60))
+
+	w.streamStatus(job.BuildID, "completed", "Build completed successfully")
+
+	if logBroker := logger.GetLogBroker(); logBroker != nil {
+		logBroker.PublishBuildComplete(job.BuildID, "completed")
+	}
 
 	msg.Ack(false)
 }
@@ -620,7 +730,6 @@ func (w *Worker) uploadBuildArtifacts(ctx context.Context, workDir, minioPrefix 
 			w.storage.PutObject(ctx, objectName, file, stat.Size())
 		}
 	}
-
 	readmePath := filepath.Join(workDir, "BUILD_README.md")
 	if pkg.FileExists(readmePath) {
 		file, err := os.Open(readmePath)
@@ -652,9 +761,270 @@ func (w *Worker) uploadBuildArtifacts(ctx context.Context, workDir, minioPrefix 
 	return err
 }
 
+func (w *Worker) validateEnvVariables(buildID, workDir string, frameworks []*builder.Framework) error {
+	for _, framework := range frameworks {
+		serviceDir := filepath.Join(workDir, framework.Path)
+
+		if framework.Name == "Next.js" {
+			return w.validateNextJsEnv(buildID, serviceDir)
+		}
+	}
+	return nil
+}
+
+func (w *Worker) validateNextJsEnv(buildID, serviceDir string) error {
+	var requiredVars []string
+	requiredVars = w.extractFromEnvExample(filepath.Join(serviceDir, ".env.example"))
+	if len(requiredVars) > 0 {
+		w.streamLog(buildID, "🔍 Found .env.example with required variables")
+		goto ValidateVars
+	}
+
+	requiredVars = w.extractFromEnvValidationFiles(serviceDir)
+	if len(requiredVars) > 0 {
+		w.streamLog(buildID, "🔍 Found environment validation file")
+		goto ValidateVars
+	}
+
+	requiredVars = w.extractFromPackageJson(serviceDir)
+	if len(requiredVars) > 0 {
+		w.streamLog(buildID, "🔍 Found env vars in package.json")
+		goto ValidateVars
+	}
+
+	requiredVars = w.extractFromNextConfig(serviceDir)
+	if len(requiredVars) > 0 {
+		w.streamLog(buildID, "🔍 Found env vars in Next.js config")
+		goto ValidateVars
+	}
+
+	w.streamLog(buildID, "ℹ️ Could not detect required environment variables")
+	return nil
+ValidateVars:
+	w.streamLog(buildID, fmt.Sprintf("Found %d environment variable(s):", len(requiredVars)))
+	for _, v := range requiredVars {
+		w.streamLog(buildID, fmt.Sprintf("   • %s", v))
+	}
+	envPath := filepath.Join(serviceDir, ".env")
+	providedEnvVars := make(map[string]bool)
+
+	if content, err := os.ReadFile(envPath); err == nil {
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) >= 1 {
+				providedEnvVars[parts[0]] = true
+			}
+		}
+	}
+
+	var missingVars []string
+	for _, envVar := range requiredVars {
+		if !providedEnvVars[envVar] {
+			missingVars = append(missingVars, envVar)
+		}
+	}
+
+	if len(missingVars) > 0 {
+		w.streamLog(buildID, "❌ Missing required environment variables:")
+		for _, v := range missingVars {
+			w.streamLog(buildID, fmt.Sprintf("   ✗ %s", v))
+		}
+		w.streamLog(buildID, "💡 Add these variables to your environment configuration in the dashboard")
+		return fmt.Errorf("missing required environment variables: %s", strings.Join(missingVars, ", "))
+	}
+
+	w.streamLog(buildID, "✅ All required environment variables are configured")
+	return nil
+}
+
+func (w *Worker) extractFromEnvExample(examplePath string) []string {
+	vars := []string{}
+	content, err := os.ReadFile(examplePath)
+	if err != nil {
+		return vars
+	}
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) >= 1 {
+			varName := strings.TrimSpace(parts[0])
+			if strings.HasPrefix(varName, "NEXT_PUBLIC_") {
+				vars = append(vars, varName)
+			}
+		}
+	}
+
+	sort.Strings(vars)
+	return vars
+}
+
+func (w *Worker) extractFromEnvValidationFiles(serviceDir string) []string {
+	vars := []string{}
+	validationFiles := []string{
+		"src/env.mjs", "src/env.js", "src/env.ts",
+		"env.mjs", "env.js", "env.ts",
+		"lib/env.ts", "config/env.ts",
+	}
+	re := regexp.MustCompile(`NEXT_PUBLIC_[A-Z_0-9]+`)
+	seen := make(map[string]bool)
+
+	for _, validationFile := range validationFiles {
+		filePath := filepath.Join(serviceDir, validationFile)
+		info, err := os.Stat(filePath)
+		if err != nil || info.Size() > 100*1024 {
+			continue
+		}
+
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		matches := re.FindAllString(string(content), -1)
+		for _, match := range matches {
+			if !seen[match] {
+				seen[match] = true
+				vars = append(vars, match)
+			}
+		}
+	}
+
+	sort.Strings(vars)
+	return vars
+}
+
+func (w *Worker) extractFromPackageJson(serviceDir string) []string {
+	vars := []string{}
+	packageJsonPath := filepath.Join(serviceDir, "package.json")
+	content, err := os.ReadFile(packageJsonPath)
+	if err != nil {
+		return vars
+	}
+	var packageJson struct {
+		Scripts map[string]string `json:"scripts"`
+	}
+
+	if err := json.Unmarshal(content, &packageJson); err != nil {
+		return vars
+	}
+
+	re := regexp.MustCompile(`NEXT_PUBLIC_[A-Z_0-9]+`)
+	seen := make(map[string]bool)
+
+	for _, script := range packageJson.Scripts {
+		matches := re.FindAllString(script, -1)
+		for _, match := range matches {
+			if !seen[match] {
+				seen[match] = true
+				vars = append(vars, match)
+			}
+		}
+	}
+
+	sort.Strings(vars)
+	return vars
+}
+
+func (w *Worker) extractFromNextConfig(serviceDir string) []string {
+	requiredVars := make(map[string]bool)
+
+	configFiles := []string{
+		"next.config.js",
+		"next.config.mjs",
+		"next.config.ts",
+	}
+
+	re := regexp.MustCompile(`process\.env\.(NEXT_PUBLIC_[A-Z_0-9]+)`)
+
+	for _, file := range configFiles {
+		filePath := filepath.Join(serviceDir, file)
+
+		info, err := os.Stat(filePath)
+		if err != nil || info.Size() > 50*1024 {
+			continue
+		}
+
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		matches := re.FindAllStringSubmatch(string(content), -1)
+		for _, match := range matches {
+			if len(match) > 1 {
+				requiredVars[match[1]] = true
+			}
+		}
+	}
+
+	vars := make([]string, 0, len(requiredVars))
+	for v := range requiredVars {
+		vars = append(vars, v)
+	}
+	sort.Strings(vars)
+
+	return vars
+}
+
+type GitHubTokenResponse struct {
+	Success bool   `json:"success"`
+	Token   string `json:"token"`
+}
+
+func (w *Worker) fetchGitHubToken(ctx context.Context, projectID string) (string, error) {
+	coreAPIURL := os.Getenv("CORE_API_URL")
+	if coreAPIURL == "" {
+		coreAPIURL = "http://core-api:7070"
+	}
+	url := fmt.Sprintf("%s/github/project-token/%s", coreAPIURL, projectID)
+	log.Printf("🔗 Fetching GitHub token from: %s", url)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch GitHub token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		log.Printf("⚠️ No GitHub integration found for project %s", projectID)
+		return "", nil
+	}
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success bool   `json:"success"`
+		Token   string `json:"token"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	log.Printf("✅ Successfully fetched GitHub token for project %s", projectID)
+	return result.Token, nil
+}
+
 func (w *Worker) streamLog(buildID, message string) {
 	log.Printf("[Build %s] %s", buildID, message)
-
 	logType := "info"
 	if strings.Contains(message, "✅") || strings.Contains(message, "successfully") || strings.Contains(message, "completed") {
 		logType = "success"
@@ -672,5 +1042,18 @@ func (w *Worker) streamLog(buildID, message string) {
 	w.db.ExecContext(ctx,
 		"INSERT INTO build_logs (build_id, log_type, message, created_at) VALUES ($1, $2, $3, NOW())",
 		buildID, logType, message,
+	)
+}
+
+func (w *Worker) streamStatus(buildID, status, message string) {
+	log.Printf("[Build %s] Status: %s - %s", buildID, status, message)
+	if logBroker := logger.GetLogBroker(); logBroker != nil {
+		logBroker.PublishStatus(buildID, status, message)
+	}
+
+	ctx := context.Background()
+	w.db.ExecContext(ctx,
+		"UPDATE builds SET status = $1 WHERE id = $2",
+		status, buildID,
 	)
 }

@@ -74,7 +74,6 @@ const EnvFileUpload: React.FC<EnvFileUploadProps> = ({ onClose, onUpload }) => {
             </div>
 
             <div className="space-y-5">
-                {/* File Upload Area */}
                 <div>
                     <label className="mb-2 block text-sm font-medium text-zinc-300">Environment File</label>
                     <div className={`relative rounded-lg border-2 border-dashed transition-colors ${dragActive ? 'border-orange-500 bg-orange-500/5' : envFile ? 'border-green-500 bg-green-500/5' : 'bg-bg-[#1b1b1b]/50 border-zinc-700'}`} onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}>
@@ -134,10 +133,10 @@ const EnvFileUpload: React.FC<EnvFileUploadProps> = ({ onClose, onUpload }) => {
                 )}
 
                 <div className="flex items-center justify-end gap-3 pt-4">
-                    <button onClick={onClose} className="rounded-lg border border-zinc-700 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800">
+                    <button onClick={onClose} className="rounded-lg border border-zinc-700 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 cursor-pointer">
                         Cancel
                     </button>
-                    <button onClick={handleSubmit} className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-orange-600 disabled:opacity-50">
+                    <button onClick={handleSubmit} className="flex items-center gap-2 rounded-lg bg-orange-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-orange-600 disabled:opacity-50 cursor-pointer">
                         <Upload size={16} />
                         Upload & Configure
                     </button>
