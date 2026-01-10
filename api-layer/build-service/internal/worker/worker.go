@@ -328,7 +328,7 @@ LIMIT 1;
 		w.streamStatus(job.BuildID, "failed", "Project not found")
 		buildTimeSeconds := int(time.Since(buildStartTime).Seconds())
 
-		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed' WHERE id = $1, build_time_seconds = $2", job.BuildID, buildTimeSeconds)
+		w.db.ExecContext(ctx, "UPDATE builds SET status = 'failed', build_time_seconds = $2 WHERE id = $1", buildTimeSeconds, job.BuildID)
 		msg.Nack(false, false)
 		return
 	}

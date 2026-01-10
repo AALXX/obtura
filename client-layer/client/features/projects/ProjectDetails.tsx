@@ -1,14 +1,14 @@
 'use client'
 import React, { useRef, useState } from 'react'
-import { Rocket, Settings, Activity, Database, Globe, GitBranch, Clock, CheckCircle2, XCircle, AlertCircle, Eye, Code, Server, Lock, RotateCcw, Play, Pause, Plus, Trash2, Copy, ExternalLink, TrendingUp, Zap, Shield, Layers, Package, Hammer, Upload, Calendar, Save } from 'lucide-react'
-import { ProjectData } from './Types/ProjectTypes'
+import { Rocket, Settings, Activity, Database, Globe, GitBranch, Clock, CheckCircle2, XCircle, AlertCircle, Eye, Code, Server, Lock, RotateCcw, Play, Pause, Plus, Trash2, Copy, ExternalLink, TrendingUp, Zap, Shield, Layers, Package, Hammer, Upload, Calendar, Save, Loader2 } from 'lucide-react'
+import { Build, BuildStatus, ProjectData } from './Types/ProjectTypes'
 import EnvFileUpload from '../account/components/EnvFileUpload'
 import DialogCanvas from '@/common-components/DialogCanvas'
 import axios from 'axios'
 import BuildDialog from './components/BuildDialog'
-import BuildCard, { Build, BuildStatus } from './components/BuildCard'
 import BuildLogsViewer from './components/BuildLogsViewer'
 import EnvVarsCard from './components/EnvVarCard'
+import { useBuildUpdates } from '@/hooks/useBuildUpdates'
 
 const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; services: { service_name: string; env_vars: Record<string, string> }[] }> = ({ projectData, accessToken, services }) => {
     const [activeTab, setActiveTab] = useState<'overview' | 'deployments' | 'environment' | 'settings' | 'monitoring' | 'builds'>('overview')
@@ -38,21 +38,35 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; 
 
     const [currentBuildId, setCurrentBuildId] = useState<string | null>(null)
 
-        const [builds, setBuilds] = useState<Build[]>(
-            projectData.builds.map(build => ({
-                id: build.id,
-                status: build.status === 'completed' ? 'success' : (build.status as BuildStatus),
-                branch: build.branch,
-                commit: build.commit,
-                startTime: build.createdAt,
-                duration: build.buildTime || undefined,
-                framework: build.framework || undefined,
-                initiatedBy: build.initiatedBy || undefined,
-                errorMessage: build.errorMessage || undefined
-            }))
-        )
+    const [builds, setBuilds] = useState<Build[]>(
+        projectData.builds.map(build => ({
+            id: build.id,
+            status: build.status === 'completed' ? 'success' : (build.status as BuildStatus),
+            branch: build.branch,
+            commit: build.commit,
+            startTime: build.createdAt,
+            duration: build.buildTime || undefined,
+            framework: build.framework || undefined,
+            initiatedBy: build.initiatedBy || undefined,
+            errorMessage: build.errorMessage || undefined
+        }))
+    )
+    const liveBuilds = useBuildUpdates(projectData.id, builds)
+
     const [selectedBuild, setSelectedBuild] = useState<Build | null>(null)
     const [showBuildLogs, setShowBuildLogs] = useState(false)
+
+    const [currentPage, setCurrentPage] = useState(1)
+    const buildsPerPage = 10
+
+    const indexOfLastBuild = currentPage * buildsPerPage
+    const indexOfFirstBuild = indexOfLastBuild - buildsPerPage
+    const currentBuilds = liveBuilds.slice(indexOfFirstBuild, indexOfLastBuild)
+    const totalPages = Math.ceil(liveBuilds.length / buildsPerPage)
+
+    const handlePageChange = (page: number) => {
+        setCurrentPage(page)
+    }
 
     const handleDeploy = (environment: string) => {
         setIsDeploying(true)
@@ -161,7 +175,6 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; 
         }
     }
 
-    
     const handleStartBuild = async () => {
         try {
             const resp = await axios.post<{ buildId: string; commitHash: string; branch: string; status: string }>(`${process.env.NEXT_PUBLIC_BACKEND_URL}/projects-manager/trigger-build`, {
@@ -180,25 +193,41 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; 
             setCurrentBuildId(newBuildId)
             setOpenBuildDialog(true)
 
-            setBuilds(prev => [
-                {
-                    id: newBuildId,
-                    status: 'building',
-                    branch: resp.data.branch || 'main',
-                    commit: resp.data.commitHash?.substring(0, 7) || 'pending...',
-                    startTime: new Date().toLocaleString(),
-                    duration: '0s'
-                },
-                ...prev
-            ])
+            const newBuild: Build = {
+                id: newBuildId,
+                status: 'queued',
+                branch: resp.data.branch || 'main',
+                commit: resp.data.commitHash?.substring(0, 7) || 'pending...',
+                startTime: new Date().toLocaleString(),
+                duration: undefined
+            }
+
+            setBuilds(prev => [newBuild, ...prev])
+
+            setCurrentPage(1)
         } catch (error) {
             console.error('Error starting build:', error)
             window.alert('Failed to start build. Please try again.')
         }
-    } 
+    }
 
     const handleBuildStatusChange = (buildData: any) => {
-        setBuilds(prev => prev.map(build => (build.id === buildData.id ? { ...build, ...buildData, status: buildData.status as 'success' | 'failed' | 'building' } : build)))
+        setBuilds(prev =>
+            prev.map(build => {
+                if (build.id === buildData.buildId) {
+                    let normalizedStatus = buildData.status
+                    if (buildData.status === 'completed') normalizedStatus = 'success'
+
+                    return {
+                        ...build,
+                        status: normalizedStatus as BuildStatus,
+                        duration: buildData.duration || build.duration,
+                        errorMessage: buildData.errorMessage || build.errorMessage
+                    }
+                }
+                return build
+            })
+        )
     }
 
     const tabs = [
@@ -807,7 +836,9 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; 
                         <div className="flex items-center justify-between">
                             <div>
                                 <h2 className="text-xl font-semibold">Build History</h2>
-                                <p className="text-sm text-zinc-400">View all builds and their logs</p>
+                                <p className="text-sm text-zinc-400">
+                                    Showing {indexOfFirstBuild + 1}-{Math.min(indexOfLastBuild, liveBuilds.length)} of {liveBuilds.length} builds
+                                </p>
                             </div>
                             <button onClick={handleStartBuild} className="flex cursor-pointer items-center gap-2 rounded-lg bg-blue-500 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:opacity-50">
                                 <Hammer size={18} />
@@ -815,20 +846,7 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; 
                             </button>
                         </div>
 
-                        <div className="space-y-4">
-                            {builds.map(build => (
-                                <BuildCard
-                                    key={build.id}
-                                    build={build}
-                                    onViewLogs={() => {
-                                        setSelectedBuild(build)
-                                        setShowBuildLogs(true)
-                                    }}
-                                />
-                            ))}
-                        </div>
-
-                        {builds.length === 0 && (
+                        {liveBuilds.length === 0 ? (
                             <div className="rounded-lg border border-zinc-800 bg-[#1b1b1b] p-12 text-center">
                                 <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-zinc-900">
                                     <Hammer className="text-zinc-600" size={32} />
@@ -840,6 +858,144 @@ const ProjectDetails: React.FC<{ projectData: ProjectData; accessToken: string; 
                                     Build
                                 </button>
                             </div>
+                        ) : (
+                            <>
+                                <div className="overflow-hidden rounded-lg border border-zinc-800 bg-[#1b1b1b]">
+                                    <table className="w-full">
+                                        <thead className="border-b border-zinc-800 bg-zinc-900/50">
+                                            <tr>
+                                                <th className="px-6 py-4 text-left text-xs font-medium tracking-wider text-zinc-400 uppercase">Status</th>
+                                                <th className="px-6 py-4 text-left text-xs font-medium tracking-wider text-zinc-400 uppercase">Build ID</th>
+                                                <th className="px-6 py-4 text-left text-xs font-medium tracking-wider text-zinc-400 uppercase">Branch</th>
+                                                <th className="px-6 py-4 text-left text-xs font-medium tracking-wider text-zinc-400 uppercase">Commit</th>
+                                                <th className="px-6 py-4 text-left text-xs font-medium tracking-wider text-zinc-400 uppercase">Started</th>
+                                                <th className="px-6 py-4 text-left text-xs font-medium tracking-wider text-zinc-400 uppercase">Duration</th>
+                                                <th className="px-6 py-4 text-left text-xs font-medium tracking-wider text-zinc-400 uppercase">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-zinc-800">
+                                            {currentBuilds.map(build => {
+                                                const getStatusDisplay = () => {
+                                                    switch (build.status) {
+                                                        case 'queued':
+                                                            return { icon: Clock, text: 'Queued', color: 'text-blue-500', bgColor: 'bg-blue-500/10' }
+                                                        case 'cloning':
+                                                            return { icon: Loader2, text: 'Cloning', color: 'text-blue-500', bgColor: 'bg-blue-500/10', spin: true }
+                                                        case 'installing':
+                                                            return { icon: Loader2, text: 'Installing', color: 'text-blue-500', bgColor: 'bg-blue-500/10', spin: true }
+                                                        case 'building':
+                                                            return { icon: Loader2, text: 'Building', color: 'text-blue-500', bgColor: 'bg-blue-500/10', spin: true }
+                                                        case 'deploying':
+                                                            return { icon: Loader2, text: 'Deploying', color: 'text-orange-500', bgColor: 'bg-orange-500/10', spin: true }
+                                                        case 'success':
+                                                            return { icon: CheckCircle2, text: 'Success', color: 'text-green-500', bgColor: 'bg-green-500/10' }
+                                                        case 'failed':
+                                                            return { icon: XCircle, text: 'Failed', color: 'text-red-500', bgColor: 'bg-red-500/10' }
+                                                        case 'cancelled':
+                                                            return { icon: XCircle, text: 'Cancelled', color: 'text-yellow-500', bgColor: 'bg-yellow-500/10' }
+                                                        default:
+                                                            return { icon: Clock, text: 'Unknown', color: 'text-zinc-500', bgColor: 'bg-zinc-500/10' }
+                                                    }
+                                                }
+
+                                                const statusDisplay = getStatusDisplay()
+                                                const StatusIcon = statusDisplay.icon
+                                                const isBuilding = ['queued', 'cloning', 'installing', 'building', 'deploying'].includes(build.status)
+
+                                                return (
+                                                    <tr key={build.id} className="transition-colors hover:bg-zinc-900/50">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${statusDisplay.bgColor}`}>
+                                                                    <StatusIcon className={`${statusDisplay.color} ${statusDisplay.spin ? 'animate-spin' : ''}`} size={16} />
+                                                                </div>
+                                                                <span className={`text-sm font-medium ${statusDisplay.color}`}>{statusDisplay.text}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="font-mono text-sm text-white">#{build.id.substring(0, 8)}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-1.5 text-sm text-zinc-300">
+                                                                <GitBranch size={14} className="text-zinc-500" />
+                                                                {build.branch}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="font-mono text-xs text-zinc-400">{build.commit.substring(0, 7)}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="text-sm text-zinc-400">{build.startTime}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="text-sm text-zinc-400">
+                                                                {build.duration ||
+                                                                    (isBuilding ? (
+                                                                        <span className="flex items-center gap-1 text-orange-400">
+                                                                            <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-orange-400" />
+                                                                            In progress
+                                                                        </span>
+                                                                    ) : (
+                                                                        '-'
+                                                                    ))}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <button
+                                                                onClick={() => {
+                                                                    setSelectedBuild(build)
+                                                                    setShowBuildLogs(true)
+                                                                }}
+                                                                className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800"
+                                                            >
+                                                                <Eye size={14} />
+                                                                View Logs
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                )
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                {/* Pagination */}
+                                {totalPages > 1 && (
+                                    <div className="flex items-center justify-between border-t border-zinc-800 pt-4">
+                                        <div className="text-sm text-zinc-400">
+                                            Page {currentPage} of {totalPages}
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage === 1} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50">
+                                                Previous
+                                            </button>
+
+                                            <div className="flex items-center gap-1">
+                                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                                                    if (page === 1 || page === totalPages || (page >= currentPage - 1 && page <= currentPage + 1)) {
+                                                        return (
+                                                            <button key={page} onClick={() => handlePageChange(page)} className={`h-10 w-10 rounded-lg text-sm font-medium transition-colors ${currentPage === page ? 'bg-orange-500 text-white' : 'border border-zinc-700 bg-zinc-900 text-white hover:bg-zinc-800'}`}>
+                                                                {page}
+                                                            </button>
+                                                        )
+                                                    } else if (page === currentPage - 2 || page === currentPage + 2) {
+                                                        return (
+                                                            <span key={page} className="text-zinc-500">
+                                                                ...
+                                                            </span>
+                                                        )
+                                                    }
+                                                    return null
+                                                })}
+                                            </div>
+
+                                            <button onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage === totalPages} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50">
+                                                Next
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
                 )}

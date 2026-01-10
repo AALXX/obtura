@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react'
 import { CheckCircle2, XCircle, Terminal, Loader2, GitBranch, Package, Clock } from 'lucide-react'
-import { BuildStatus, Build } from './BuildCard'
+import { BuildStatus, Build } from '../Types/ProjectTypes'
 import axios from 'axios'
 
 interface BuildLogsViewerProps {
@@ -12,43 +12,127 @@ interface BuildLogsViewerProps {
 const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => {
     const [logs, setLogs] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'error' | 'warning' }>>([])
     const [isLoading, setIsLoading] = useState(true)
+    const [currentStatus, setCurrentStatus] = useState<BuildStatus>(build.status)
     const logsEndRef = useRef<HTMLDivElement>(null)
+    const eventSourceRef = useRef<EventSource | null>(null)
+    const hasLoadedHistoricalLogs = useRef(false)
+
     useEffect(() => {
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, [logs])
 
     useEffect(() => {
-        const fetchBuildLogs = async () => {
+        const fetchHistoricalLogs = async () => {
+            if (hasLoadedHistoricalLogs.current) return
+
             setIsLoading(true)
             try {
                 const resp = await axios.get<{ logs: any[] }>(`${process.env.NEXT_PUBLIC_BUILD_SERVICE_URL}/builds/${build.id}/logs`)
-                if (resp.status !== 200) {
-                    throw new Error('Failed to fetch build logs')
+
+                if (resp.status === 200 && resp.data.logs && resp.data.logs.length > 0) {
+                    const transformedLogs = resp.data.logs.map((log: any) => ({
+                        time: new Date(log.created_at).toLocaleTimeString('en-US', { hour12: false }),
+                        message: log.message,
+                        type: log.log_type as 'info' | 'success' | 'error' | 'warning'
+                    }))
+
+                    setLogs(transformedLogs)
+                    hasLoadedHistoricalLogs.current = true
                 }
-
-                const transformedLogs = resp.data.logs.map((log: any) => ({
-                    time: new Date(log.created_at).toLocaleTimeString('en-US', { hour12: false }),
-                    message: log.message,
-                    type: log.log_type as 'info' | 'success' | 'error' | 'warning'
-                }))
-
-                setLogs(transformedLogs)
             } catch (error) {
-                console.error('Error fetching build logs:', error)
-                setLogs([
-                    {
-                        time: new Date().toLocaleTimeString('en-US', { hour12: false }),
-                        message: 'Failed to load build logs',
-                        type: 'error'
-                    }
-                ])
+                console.error('Error fetching historical logs:', error)
             } finally {
                 setIsLoading(false)
             }
         }
 
-        fetchBuildLogs()
-    }, [build.id])
+        const isActive = ['queued', 'cloning', 'installing', 'building', 'running', 'deploying'].includes(currentStatus)
+
+        fetchHistoricalLogs().then(() => {
+            if (isActive) {
+                const eventSource = new EventSource(`${process.env.NEXT_PUBLIC_BUILD_SERVICE_URL}/builds/${build.id}/logs/stream`)
+                eventSourceRef.current = eventSource
+
+                eventSource.addEventListener('connected', e => {
+                    console.log('Connected to build logs stream:', e.data)
+                })
+
+                eventSource.addEventListener('log', e => {
+                    try {
+                        const logData = JSON.parse(e.data)
+                        const newLog = {
+                            time: new Date(logData.timestamp).toLocaleTimeString('en-US', { hour12: false }),
+                            message: logData.message,
+                            type: logData.type
+                        }
+                        setLogs(prev => [...prev, newLog])
+                    } catch (error) {
+                        console.error('Error parsing log:', error)
+                    }
+                })
+
+                eventSource.addEventListener('status', e => {
+                    try {
+                        const statusData = JSON.parse(e.data)
+
+                        let normalizedStatus = statusData.status
+                        if (statusData.status === 'completed' || statusData.status === 'complete') {
+                            normalizedStatus = 'success'
+                        }
+
+                        setCurrentStatus(normalizedStatus)
+
+                        const newLog = {
+                            time: new Date(statusData.timestamp).toLocaleTimeString('en-US', { hour12: false }),
+                            message: statusData.message,
+                            type: 'info' as const
+                        }
+                        setLogs(prev => [...prev, newLog])
+                    } catch (error) {
+                        console.error('Error parsing status:', error)
+                    }
+                })
+
+                eventSource.addEventListener('complete', e => {
+                    try {
+                        const statusData = JSON.parse(e.data)
+
+                        let normalizedStatus = statusData.status
+                        if (statusData.status === 'completed' || statusData.status === 'complete') {
+                            normalizedStatus = 'success'
+                        }
+
+                        setCurrentStatus(normalizedStatus)
+
+                        const newLog = {
+                            time: new Date(statusData.timestamp).toLocaleTimeString('en-US', { hour12: false }),
+                            message: statusData.message,
+                            type: normalizedStatus === 'success' ? ('success' as const) : ('error' as const)
+                        }
+                        setLogs(prev => [...prev, newLog])
+                        eventSource.close()
+                    } catch (error) {
+                        console.error('Error parsing completion:', error)
+                    }
+                })
+
+                eventSource.onerror = error => {
+                    console.error('SSE error:', error)
+                    if (eventSource.readyState === EventSource.CLOSED) {
+                        console.log('SSE connection closed')
+                    }
+                    eventSource.close()
+                }
+            }
+        })
+
+        return () => {
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close()
+                eventSourceRef.current = null
+            }
+        }
+    }, [build.id, currentStatus])
 
     const getStatusDisplay = () => {
         switch (build.status) {
@@ -73,7 +157,7 @@ const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => 
 
     const statusDisplay = getStatusDisplay()
     const StatusIcon = statusDisplay.icon
-    const isBuilding = ['queued', 'cloning', 'installing', 'building'].includes(build.status)
+    const isBuilding = ['queued', 'cloning', 'installing', 'building', 'deploying', 'running'].includes(currentStatus)
 
     return (
         <div className="flex h-full w-full flex-col">
@@ -85,7 +169,7 @@ const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => 
                             <StatusIcon className={`${statusDisplay.color} ${isBuilding ? 'animate-spin' : ''}`} size={24} />
                         </div>
                         <div>
-                            <h2 className="text-xl font-semibold text-white">Build #{build.id}</h2>
+                            <h2 className="text-xl font-semibold text-white">Build #{build.id.substring(0, 8)}</h2>
                             <p className="text-sm text-zinc-400">
                                 {statusDisplay.text} • {build.branch}
                             </p>
@@ -98,11 +182,11 @@ const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => 
             <div className="border-b border-zinc-800 bg-zinc-900/50 p-5">
                 <div className="flex items-center justify-between">
                     {(['cloning', 'installing', 'building'] as const).map((step, idx) => {
-                        const stepIndex = ['queued', 'cloning', 'installing', 'building', 'success', 'failed', 'cancelled'].indexOf(build.status)
-                        const currentStepIndex = ['queued', 'cloning', 'installing', 'building', 'success', 'failed', 'cancelled'].indexOf(step)
-                        const isComplete = stepIndex > currentStepIndex || build.status === 'success'
-                        const isCurrent = build.status === step
-                        const isFailed = build.status === 'failed' && currentStepIndex <= stepIndex
+                        const stepIndex = ['queued', 'cloning', 'installing', 'building', 'deploying', 'success', 'failed', 'cancelled'].indexOf(currentStatus)
+                        const currentStepIndex = ['queued', 'cloning', 'installing', 'building', 'deploying', 'success', 'failed', 'cancelled'].indexOf(step)
+                        const isComplete = stepIndex > currentStepIndex || currentStatus === 'success'
+                        const isCurrent = currentStatus === step
+                        const isFailed = currentStatus === 'failed' && currentStepIndex <= stepIndex
 
                         return (
                             <React.Fragment key={step}>
@@ -124,7 +208,7 @@ const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => 
             </div>
 
             {/* Success Banner */}
-            {build.status === 'success' && (
+            {currentStatus === 'success' && (
                 <div className="border-b border-zinc-800 bg-green-500/5 p-4">
                     <div className="flex items-center gap-3">
                         <CheckCircle2 className="text-green-500" size={20} />
@@ -136,11 +220,30 @@ const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => 
                 </div>
             )}
 
+            {/* Failed Banner */}
+            {currentStatus === 'failed' && (
+                <div className="border-b border-zinc-800 bg-red-500/5 p-4">
+                    <div className="flex items-center gap-3">
+                        <XCircle className="text-red-500" size={20} />
+                        <div>
+                            <div className="text-sm font-semibold text-red-500">Build Failed</div>
+                            {build.errorMessage && <div className="text-sm text-zinc-400">{build.errorMessage}</div>}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Logs Terminal */}
             <div className="flex-1 overflow-hidden p-5">
                 <div className="mb-3 flex items-center gap-2 text-sm text-zinc-400">
                     <Terminal size={16} />
                     <span className="font-medium">Build Logs</span>
+                    {isBuilding && (
+                        <span className="flex items-center gap-1 text-xs text-orange-400">
+                            <div className="h-2 w-2 animate-pulse rounded-full bg-orange-400" />
+                            Live
+                        </span>
+                    )}
                 </div>
                 <div className="h-[calc(100%-2rem)] overflow-y-auto rounded-lg border border-zinc-800 bg-black p-4 font-mono text-xs">
                     {isLoading ? (
@@ -148,6 +251,8 @@ const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => 
                             <Loader2 className="animate-spin" size={16} />
                             <span>Loading build logs...</span>
                         </div>
+                    ) : logs.length === 0 ? (
+                        <div className="text-zinc-500">No logs available yet...</div>
                     ) : (
                         <>
                             {logs.map((log, idx) => (
@@ -165,16 +270,22 @@ const BuildLogsViewer: React.FC<BuildLogsViewerProps> = ({ build, onClose }) => 
             {/* Footer */}
             <div className="flex items-center justify-between border-t border-zinc-800 bg-zinc-900/50 p-5">
                 <div className="text-sm text-zinc-400">
-                    {build.status === 'failed' && (
+                    {currentStatus === 'failed' && (
                         <span className="flex items-center gap-2 text-red-400">
                             <XCircle size={16} />
                             Build failed. Check logs for details.
                         </span>
                     )}
-                    {build.status === 'success' && (
+                    {currentStatus === 'success' && (
                         <span className="flex items-center gap-2 text-green-400">
                             <CheckCircle2 size={16} />
-                            Build completed in {build.duration}
+                            Build completed in {build.duration || 'calculating...'}
+                        </span>
+                    )}
+                    {isBuilding && (
+                        <span className="flex items-center gap-2 text-orange-400">
+                            <Loader2 className="animate-spin" size={16} />
+                            Build in progress...
                         </span>
                     )}
                 </div>

@@ -79,7 +79,15 @@ const BuildDialog: React.FC<BuildDialogProps> = ({ accessToken, projectId, gitRe
         eventSource.addEventListener('status', event => {
             try {
                 const data = JSON.parse((event as MessageEvent).data)
-
+                onBuildStatusChange({
+                    id: buildId,
+                    status: data.status,
+                    branch: 'main',
+                    commit: 'latest',
+                    startTime: new Date(startTimeRef.current).toISOString(),
+                    endTime: new Date().toISOString(),
+                    duration: formatBuildTime(Math.floor((Date.now() - startTimeRef.current) / 1000))
+                })
                 if (data.status === 'queued') setStatus('queued')
                 else if (data.status === 'cloning') setStatus('cloning')
                 else if (data.status === 'installing') setStatus('installing')
@@ -108,14 +116,12 @@ const BuildDialog: React.FC<BuildDialogProps> = ({ accessToken, projectId, gitRe
                     endTime: new Date().toISOString(),
                     duration: finalDuration
                 })
-
             } catch (error) {
                 console.error('Error parsing completion message:', error)
             }
         })
 
-        eventSource.addEventListener('heartbeat', event => {
-        })
+        eventSource.addEventListener('heartbeat', event => {})
 
         eventSource.onerror = error => {
             console.error('❌ SSE error:', error)

@@ -74,3 +74,19 @@ export interface ProjectResponse {
     teamName: string
     memberCount: number
 }
+
+export type BuildStatus = 'queued' | 'cloning' | 'installing' | 'building' | 'running'| 'deploying' | 'success' | 'failed' | 'cancelled'
+
+export interface Build {
+    id: string
+    status: BuildStatus
+    branch: string
+    commit: string
+    startTime: string
+    endTime?: string
+    duration?: string
+    deploymentUrl?: string
+    framework?: string
+    initiatedBy?: string
+    errorMessage?: string
+}

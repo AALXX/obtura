@@ -1,4 +1,4 @@
-package logger	
+package logger
 
 import (
 	"encoding/json"
@@ -25,11 +25,11 @@ type StatusMessage struct {
 }
 
 type LogBroker struct {
-	clients       map[string]map[chan interface{}]bool 
-	newClients    chan clientSubscription
-	closing       chan clientSubscription
-	messages      chan interface{}
-	mu            sync.RWMutex
+	clients    map[string]map[chan interface{}]bool
+	newClients chan clientSubscription
+	closing    chan clientSubscription
+	messages   chan interface{}
+	mu         sync.RWMutex
 }
 
 type clientSubscription struct {
@@ -80,14 +80,14 @@ func (b *LogBroker) Start() {
 
 		case msg := <-b.messages:
 			var buildID string
-			
+
 			switch m := msg.(type) {
 			case LogMessage:
 				buildID = m.BuildID
 			case StatusMessage:
 				buildID = m.BuildID
 			}
-			
+
 			b.mu.RLock()
 			if clients, ok := b.clients[buildID]; ok {
 				for client := range clients {
@@ -134,9 +134,14 @@ func (b *LogBroker) PublishStatus(buildID, status, message string) {
 }
 
 func (b *LogBroker) PublishBuildComplete(buildID string, status string) {
+	normalizedStatus := status
+	if status == "completed" {
+		normalizedStatus = "success"
+	}
+
 	msg := StatusMessage{
-		Status:    "complete",
-		Message:   fmt.Sprintf("Build %s - Status: %s", buildID, status),
+		Status:    normalizedStatus, 
+		Message:   fmt.Sprintf("Build completed - Status: %s", normalizedStatus),
 		Timestamp: time.Now(),
 		BuildID:   buildID,
 	}
@@ -159,7 +164,6 @@ func (b *LogBroker) PublishBuildComplete(buildID string, status string) {
 		}
 	})
 }
-
 func HandleBuildLogsSSE(c *gin.Context) {
 	buildID := c.Param("buildId")
 
@@ -205,23 +209,23 @@ func HandleBuildLogsSSE(c *gin.Context) {
 				log.Printf("📡 Client channel closed for build %s", buildID)
 				return
 			}
-			
+
 			// Handle different message types
 			switch m := msg.(type) {
 			case LogMessage:
 				data, _ := json.Marshal(m)
 				fmt.Fprintf(c.Writer, "event: log\ndata: %s\n\n", data)
 				c.Writer.Flush()
-				
+
 			case StatusMessage:
 				data, _ := json.Marshal(m)
-				
+
 				if m.Status == "complete" {
 					fmt.Fprintf(c.Writer, "event: complete\ndata: %s\n\n", data)
 					c.Writer.Flush()
 					return
 				}
-				
+
 				fmt.Fprintf(c.Writer, "event: status\ndata: %s\n\n", data)
 				c.Writer.Flush()
 			}
